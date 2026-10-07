@@ -78,7 +78,7 @@ function casca(conteudo, ativo) {
   app.innerHTML = `
     ${B.modo === 'demo' ? '<div class="faixa-demo">Modo demonstração: os dados ficam só neste navegador. Configure o Firebase para uso real.</div>' : ''}
     <header class="topo"><div class="topo-in">
-      <a href="#/painel"><img src="assets/raguife-logo.png" alt="Raguife"></a>
+      <a href="#/painel"><img src="raguife-logo.png" alt="Raguife"></a>
       <span class="titulo-sis">Auditoria Interna</span>
       <nav class="menu">${links.map(([h, t, k]) => `<a href="${h}" class="${k === ativo ? 'ativo' : ''}">${t}</a>`).join('')}
         <span class="usuario">${esc(eu.nome)} · ${PERFIS[eu.perfil]}</span>
@@ -91,7 +91,7 @@ function casca(conteudo, ativo) {
 // ======================= login =======================
 function telaLogin() {
   app.innerHTML = `<div class="login"><form class="caixa" id="f">
-    <img src="assets/raguife-logo.png" alt="Raguife">
+    <img src="raguife-logo.png" alt="Raguife">
     <h1>Auditoria Interna de Processos</h1>
     ${B.modo === 'demo' ? '<p class="avisos" style="margin-bottom:16px">Modo demonstração. Acesse com <b>admin@demo</b> / <b>demo123</b>.</p>' : ''}
     <div class="campo"><label for="em">E-mail</label><input id="em" type="email" autocomplete="username" required></div>
@@ -115,7 +115,7 @@ function telaLogin() {
 }
 function telaSemPerfil(u, inativo) {
   app.innerHTML = `<div class="login"><div class="caixa">
-    <img src="assets/raguife-logo.png" alt="Raguife">
+    <img src="raguife-logo.png" alt="Raguife">
     <h1>${inativo ? 'Acesso desativado' : 'Usuário sem perfil'}</h1>
     <p>${inativo ? 'Seu acesso foi desativado pelo administrador.' : 'Seu login existe, mas ainda não tem perfil de acesso. Peça ao administrador do sistema.'}</p>
     ${inativo ? '' : `<p class="pequeno suave">Primeiro acesso do sistema? Siga o passo “Criar o primeiro administrador” do guia de implantação usando este identificador:<br><span class="codigo" style="font-size:13px;word-break:break-all">${esc(u.uid)}</span></p>`}
@@ -530,7 +530,7 @@ async function telaRelatorio(mes) {
     <div class="cab nao-imprimir"><div><div class="legenda"><a href="#/mes/${mes}">${nomeMes(mes)}</a></div><h1>Relatório de conformidade</h1></div>
       <div class="acoes">${B.modo === 'demo' ? '<span class="suave pequeno">No sistema publicado, aqui aparece o botão “Imprimir / salvar PDF”.</span>' : '<button class="btn" id="imprimir">Imprimir / salvar PDF</button>'}<a class="btn sec" href="#/mes/${mes}">Voltar</a></div></div>
     <article class="rel">
-      <div class="rel-cab"><div><img src="assets/raguife-logo.png" alt="Raguife"></div>
+      <div class="rel-cab"><div><img src="raguife-logo.png" alt="Raguife"></div>
         <div style="text-align:right"><div class="legenda">Relatório de auditoria interna</div><h1 style="font-size:22px">${nomeMes(mes)}</h1>
         <div class="pequeno suave">Competência analisada: ${nomeMes(a.competencia)}</div>
         <div style="margin-top:6px"><span class="selo ${final ? 'final' : 'parcial'}">${final ? 'RELATÓRIO FINAL' : 'PARCIAL — MÊS EM ABERTO'}</span></div></div></div>
