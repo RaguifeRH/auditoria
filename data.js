@@ -10,7 +10,7 @@ async function backendFirebase(cfg) {
   const authM = await import(`https://www.gstatic.com/firebasejs/${V}/firebase-auth.js`);
   const fsM = await import(`https://www.gstatic.com/firebasejs/${V}/firebase-firestore.js`);
   const { initializeApp, deleteApp } = appM;
-  const { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut, sendPasswordResetEmail, createUserWithEmailAndPassword } = authM;
+  const { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut, sendPasswordResetEmail, createUserWithEmailAndPassword, EmailAuthProvider, reauthenticateWithCredential, updatePassword } = authM;
   const { getFirestore, doc, getDoc, setDoc, updateDoc, collection, getDocs, query, where, FieldPath, arrayUnion, deleteDoc } = fsM;
 
   const app = initializeApp(cfg);
@@ -24,6 +24,11 @@ async function backendFirebase(cfg) {
     login: (email, senha) => signInWithEmailAndPassword(auth, email, senha),
     logout: () => signOut(auth),
     resetSenha: email => sendPasswordResetEmail(auth, email),
+    async trocarSenha(atual, nova) {
+      const u = auth.currentUser;
+      await reauthenticateWithCredential(u, EmailAuthProvider.credential(u.email, atual));
+      await updatePassword(u, nova);
+    },
 
     async perfil(uid) { const s = await getDoc(doc(db, 'usuarios', uid)); return s.exists() ? { uid, ...s.data() } : null; },
     async listarUsuarios() { const s = await getDocs(collection(db, 'usuarios')); return s.docs.map(d => ({ uid: d.id, ...d.data() })); },
@@ -60,6 +65,12 @@ async function backendFirebase(cfg) {
     async lerAmostra(mes, procId) { const s = await getDoc(doc(db, 'auditorias', mes, 'amostras', procId)); return s.exists() ? s.data() : null; },
     salvarAmostra: (mes, procId, dados) => setDoc(doc(db, 'auditorias', mes, 'amostras', procId), dados),
     excluirAmostra: (mes, procId) => deleteDoc(doc(db, 'auditorias', mes, 'amostras', procId)),
+    async excluirAuditoria(mes) {
+      const s = await getDocs(collection(db, 'auditorias', mes, 'amostras'));
+      for (const d of s.docs) await deleteDoc(d.ref);
+      await deleteDoc(doc(db, 'auditorias', mes, 'base', 'funcionarios'));
+      await deleteDoc(doc(db, 'auditorias', mes));
+    },
     responder: (mes, procId, pk, idx, valor) =>
       updateDoc(doc(db, 'auditorias', mes, 'amostras', procId), new FieldPath('respostas', pk, String(idx)), valor),
   };
@@ -93,6 +104,11 @@ function backendDemo() {
     },
     async logout() { setSessao(null); },
     async resetSenha() { await espera(); },
+    async trocarSenha(atual, nova) {
+      const u = st.usuarios[sessao?.uid];
+      if (!u || u.senha !== atual) { const e = new Error('Senha atual incorreta'); e.code = 'auth/wrong-password'; throw e; }
+      u.senha = nova; salvar();
+    },
     async perfil(uid) { const u = st.usuarios[uid]; if (!u) return null; const { senha, ...r } = u; return { uid, ...clone(r) }; },
     async listarUsuarios() { return Object.entries(st.usuarios).map(([uid, u]) => { const { senha, ...r } = u; return { uid, ...clone(r) }; }); },
     async criarUsuario({ nome, email, senha, perfil, areas }) {
@@ -112,6 +128,7 @@ function backendDemo() {
     async lerAmostra(mes, p) { return clone(st.amostras[mes]?.[p] || null); },
     async salvarAmostra(mes, p, dados) { (st.amostras[mes] ||= {})[p] = clone(dados); salvar(); },
     async excluirAmostra(mes, p) { delete st.amostras[mes]?.[p]; salvar(); },
+    async excluirAuditoria(mes) { delete st.amostras[mes]; delete st.base[mes]; delete st.auditorias[mes]; salvar(); },
     async responder(mes, p, pk, idx, valor) { await espera(); const a = st.amostras[mes][p]; ((a.respostas ||= {})[pk] ||= {})[idx] = clone(valor); salvar(); },
   };
 }

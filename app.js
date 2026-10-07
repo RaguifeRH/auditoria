@@ -83,10 +83,29 @@ function casca(conteudo, ativo) {
       <span class="titulo-sis">Auditoria Interna</span>
       <nav class="menu">${links.map(([h, t, k]) => `<a href="${h}" class="${k === ativo ? 'ativo' : ''}">${t}</a>`).join('')}
         <span class="usuario">${esc(eu.nome)} · ${PERFIS[eu.perfil]}</span>
+        <button class="btn sec peq" id="minhaSenha">Minha senha</button>
         <button class="btn sec peq" id="sair">Sair</button></nav>
     </div></header>
     <main>${conteudo}</main>`;
   $('#sair').onclick = () => B.logout();
+  $('#minhaSenha').onclick = trocarMinhaSenha;
+}
+
+async function trocarMinhaSenha() {
+  const ok = await modal(`<h2>Alterar minha senha</h2>
+    <div class="campo"><label for="s-atual">Senha atual</label><input id="s-atual" type="password" autocomplete="current-password"></div>
+    <div class="campo"><label for="s-nova">Nova senha (mínimo 6 caracteres)</label><input id="s-nova" type="password" autocomplete="new-password"></div>
+    <div class="campo"><label for="s-conf">Repita a nova senha</label><input id="s-conf" type="password" autocomplete="new-password"></div>`, {
+    okTxt: 'Alterar senha',
+    onOk: async f => {
+      const at = f.querySelector('#s-atual').value, nv = f.querySelector('#s-nova').value, cf = f.querySelector('#s-conf').value;
+      if (nv.length < 6) throw new Error('A nova senha precisa ter pelo menos 6 caracteres.');
+      if (nv !== cf) throw new Error('A confirmação não é igual à nova senha.');
+      try { await B.trocarSenha(at, nv); } catch (e) { throw new Error(/wrong-password|invalid-credential/.test(e.code || '') ? 'Senha atual incorreta.' : msgErro(e)); }
+      return true;
+    },
+  });
+  if (ok) toast('Senha alterada.');
 }
 
 // ======================= login =======================
@@ -326,7 +345,7 @@ async function telaMes(mes) {
     <div class="cab"><div><div class="legenda">Auditoria · <span class="chip ${a.status}">${aberta ? 'Aberta' : 'Fechada'}</span></div>
       <h1>${nomeMes(mes)}</h1><div class="suave">Competência ${nomeMes(a.competencia)} · código de sorteio <b>${esc(a.codigo)}</b></div></div>
       <div class="acoes"><a class="btn sec" href="#/relatorio/${mes}">Relatório</a>
-      ${isAdmin() ? (aberta ? '<button class="btn" id="fechar">Fechar mês</button>' : '<button class="btn sec" id="reabrir">Reabrir mês</button>') : ''}</div></div>
+      ${isAdmin() ? (aberta ? '<button class="btn" id="fechar">Fechar mês</button>' : '<button class="btn sec" id="reabrir">Reabrir mês</button>') + '<button class="btn perigo" id="excluirMes">Excluir auditoria</button>' : ''}</div></div>
     <div class="kpis">
       <div class="kpi"><div class="legenda">Itens respondidos</div><div class="v">${tot.resp}<span class="suave" style="font-size:16px"> / ${tot.total}</span></div></div>
       <div class="kpi"><div class="legenda">Pendentes</div><div class="v">${tot.pend}</div></div>
@@ -361,6 +380,23 @@ async function telaMes(mes) {
   });
   $('#fechar')?.addEventListener('click', () => fecharMes(a, ams));
   $('#reabrir')?.addEventListener('click', () => reabrirMes(a));
+  $('#excluirMes')?.addEventListener('click', () => excluirMes(a));
+}
+
+async function excluirMes(a) {
+  const palavra = 'EXCLUIR';
+  const ok = await modal(`<h2>Excluir a auditoria de ${nomeMes(a.id)}?</h2>
+    <p>Serão apagados <b>definitivamente</b> as amostras sorteadas, todas as respostas dos checklists e o histórico deste mês. Não é possível desfazer.</p>
+    ${a.status === 'fechada' ? '<p class="avisos">Este mês já está fechado e pode ter relatório arquivado.</p>' : ''}
+    <div class="campo"><label for="conf-ex">Para confirmar, digite ${palavra}</label><input id="conf-ex" type="text" autocomplete="off"></div>`, {
+    okTxt: 'Excluir definitivamente', perigo: true,
+    onOk: async f => {
+      if (f.querySelector('#conf-ex').value.trim().toUpperCase() !== palavra) throw new Error(`Digite ${palavra} para confirmar.`);
+      try { await B.excluirAuditoria(a.id); } catch (e) { throw new Error(msgErro(e)); }
+      return true;
+    },
+  });
+  if (ok) { toast(`Auditoria de ${nomeMes(a.id)} excluída.`); location.hash = '#/painel'; }
 }
 
 // Importação de lista: os arquivos são lidos assim que escolhidos, e o sorteio só acontece na confirmação.
@@ -637,7 +673,7 @@ async function telaUsuarios() {
       ${us.map(u => `<tr><td><b>${esc(u.nome)}</b></td><td>${esc(u.email)}</td><td>${PERFIS[u.perfil] || u.perfil}</td>
         <td class="pequeno">${u.perfil === 'admin' ? 'Todas' : (u.areas || []).map(areaNome).join(', ') || '—'}</td>
         <td><span class="chip ${u.ativo ? 'ok' : 'nc'}">${u.ativo ? 'Ativo' : 'Inativo'}</span></td>
-        <td class="num"><button class="btn sec peq" data-ed="${u.uid}">Editar</button> <button class="btn sec peq" data-rs="${esc(u.email)}">Redefinir senha</button></td></tr>`).join('')}
+        <td class="num"><button class="btn sec peq" data-ed="${u.uid}">Editar</button> <button class="btn sec peq" data-rs="${esc(u.email)}">Enviar link de nova senha</button></td></tr>`).join('')}
     </tbody></table></div></div>
     <div class="cartao pequeno"><h3>Perfis</h3><p><b>Administrador:</b> abre e fecha meses, importa listas, cadastra usuários e configura processos. Acessa todas as áreas.<br>
       <b>Auditor:</b> responde os checklists das áreas liberadas para ele.<br><b>Visualizador:</b> consulta checklists e relatórios das áreas liberadas, sem alterar.</p></div>`, 'usuarios');
