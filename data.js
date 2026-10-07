@@ -40,15 +40,15 @@ async function backendFirebase(cfg) {
     },
     atualizarUsuario: (uid, dados) => updateDoc(doc(db, 'usuarios', uid), { ...dados, alteradoEm: agora(), alteradoPor: uidAtual }),
 
-    async lerConfig() { const s = await getDoc(doc(db, 'config', 'processos')); return s.exists() ? s.data().lista : null; },
-    salvarConfig: lista => setDoc(doc(db, 'config', 'processos'), { lista, alteradoEm: agora(), alteradoPor: uidAtual }),
+    async lerConfig() { const s = await getDoc(doc(db, 'config', 'processos')); return s.exists() ? { lista: s.data().lista, versao: s.data().versao || 1 } : null; },
+    salvarConfig: (lista, versao) => setDoc(doc(db, 'config', 'processos'), { lista, versao, alteradoEm: agora(), alteradoPor: uidAtual }),
 
     async listarAuditorias() { const s = await getDocs(collection(db, 'auditorias')); return s.docs.map(d => ({ id: d.id, ...d.data() })); },
     async lerAuditoria(mes) { const s = await getDoc(doc(db, 'auditorias', mes)); return s.exists() ? { id: mes, ...s.data() } : null; },
     salvarAuditoria: (mes, dados) => setDoc(doc(db, 'auditorias', mes), dados, { merge: true }),
     registrarLog: (mes, evento) => updateDoc(doc(db, 'auditorias', mes), { log: arrayUnion({ ...evento, em: agora() }) }),
-    salvarBase: (mes, pessoas) => setDoc(doc(db, 'auditorias', mes, 'base', 'funcionarios'), { pessoas }),
-    async lerBase(mes) { const s = await getDoc(doc(db, 'auditorias', mes, 'base', 'funcionarios')); return s.exists() ? s.data().pessoas : null; },
+    salvarBase: (mes, pessoas, desligados) => setDoc(doc(db, 'auditorias', mes, 'base', 'funcionarios'), { pessoas, desligados }),
+    async lerBase(mes) { const s = await getDoc(doc(db, 'auditorias', mes, 'base', 'funcionarios')); return s.exists() ? s.data() : null; },
 
     async listarAmostras(mes, areas) {
       const col = collection(db, 'auditorias', mes, 'amostras');
@@ -100,13 +100,13 @@ function backendDemo() {
       const uid = 'u' + Date.now(); st.usuarios[uid] = { nome, email, senha, perfil, areas, ativo: true, criadoEm: agora() }; salvar(); return uid;
     },
     async atualizarUsuario(uid, dados) { Object.assign(st.usuarios[uid], clone(dados)); salvar(); },
-    async lerConfig() { return clone(st.config); },
-    async salvarConfig(lista) { st.config = clone(lista); salvar(); },
+    async lerConfig() { return st.config ? clone(st.config.lista ? st.config : { lista: st.config, versao: 1 }) : null; },
+    async salvarConfig(lista, versao) { st.config = clone({ lista, versao }); salvar(); },
     async listarAuditorias() { return Object.entries(st.auditorias).map(([id, a]) => ({ id, ...clone(a) })); },
     async lerAuditoria(mes) { return st.auditorias[mes] ? { id: mes, ...clone(st.auditorias[mes]) } : null; },
     async salvarAuditoria(mes, dados) { st.auditorias[mes] = { ...(st.auditorias[mes] || {}), ...clone(dados) }; salvar(); },
     async registrarLog(mes, ev) { const a = st.auditorias[mes]; a.log = [...(a.log || []), { ...ev, em: agora() }]; salvar(); },
-    async salvarBase(mes, pessoas) { st.base[mes] = clone(pessoas); salvar(); },
+    async salvarBase(mes, pessoas, desligados) { st.base[mes] = clone({ pessoas, desligados }); salvar(); },
     async lerBase(mes) { return clone(st.base[mes] || null); },
     async listarAmostras(mes, areas) { const t = Object.values(st.amostras[mes] || {}); return clone(areas ? t.filter(x => areas.includes(x.area)) : t); },
     async lerAmostra(mes, p) { return clone(st.amostras[mes]?.[p] || null); },

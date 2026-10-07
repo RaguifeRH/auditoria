@@ -1,7 +1,7 @@
 import { firebaseConfig } from './config.js';
 import { criarBackend } from './data.js';
-import { AREAS, FONTES, PROCESSOS_PADRAO, areaNome } from './processos.js';
-import { lerPlanilha, identificar, lerFuncionarios, lerComplementar, juntarBase, lerLista, fmtData } from './importar.js';
+import { AREAS, FONTES, PROCESSOS_PADRAO, VERSAO_CATALOGO, areaNome } from './processos.js';
+import { lerPlanilha, identificar, lerFuncionarios, lerComplementar, juntarBase, lerLista, mesclar, fmtData } from './importar.js';
 import { nomeMes, competenciaDe, gerarCodigo, impressao, tamanhoAmostra, sortear, populacao } from './sorteio.js';
 
 // ======================= utilidades =======================
@@ -52,7 +52,8 @@ const podeEditarArea = area => isAdmin() || (eu?.perfil === 'auditor' && (eu.are
 
 async function carregarCatalogo() {
   const c = await B.lerConfig();
-  catalogo = c && c.length ? c : structuredClone(PROCESSOS_PADRAO);
+  // Configuração salva com catálogo antigo é substituída pelo padrão atual
+  catalogo = c && c.lista?.length && c.versao >= VERSAO_CATALOGO ? c.lista : structuredClone(PROCESSOS_PADRAO);
 }
 
 // Estatística de uma amostra
@@ -264,7 +265,7 @@ async function telaAbrir(mes) {
 }
 
 const pessoaMin = (f, i) => ({ k: 'p' + i, id: f.id, chapa: f.chapa, nome: f.nome, cargo: f.cargo || '', depto: f.depto || '',
-  adm: f.adm ? fmtData(f.adm) : '', dem: f.dem ? fmtData(f.dem) : '', escala: f.escala || '' });
+  adm: f.adm ? fmtData(f.adm) : '', dem: f.dem ? fmtData(f.dem) : '', escala: f.escala || '', status: f.status || '' });
 
 async function abrirMes(mes, comp, r, pops, doBase) {
   const ts = new Date().toISOString(), por = { uid: eu.uid, nome: eu.nome };
@@ -272,7 +273,10 @@ async function abrirMes(mes, comp, r, pops, doBase) {
   await B.salvarAuditoria(mes, { mes, competencia: comp, status: 'aberta', codigo: r.codigo, abertura: { ...por, em: ts }, processos,
     log: [{ ev: 'abertura', ...por, em: ts }] });
   // snapshot mínimo da base (sem CPF, salário, nascimento) para enriquecer as listas importadas
-  await B.salvarBase(mes, pops.ativos.map((f, i) => pessoaMin(f, i)));
+  // desligados nos 24 meses anteriores: só nome e datas, para identificar quem aparece nas listas após o desligamento
+  const [ca, cm] = comp.split('-').map(Number), ini = new Date(ca, cm - 1, 1), corte = new Date(ca - 2, cm - 1, 1);
+  const desligados = r.base.filter(f => f.dem && f.dem < ini && f.dem >= corte).map(f => ({ id: f.id, chapa: f.chapa, nome: f.nome, adm: fmtData(f.adm), dem: fmtData(f.dem) }));
+  await B.salvarBase(mes, pops.ativos.map((f, i) => pessoaMin(f, i)), desligados);
   for (const p of processos) {
     if (p.fonte === 'unico') {
       await B.salvarAmostra(mes, p.id, { procId: p.id, area: p.area, nome: p.nome, fonte: p.fonte, itens: p.itens, N: 1, n: 1, impressao: '—',
@@ -300,10 +304,11 @@ async function telaMes(mes) {
   const cardProc = p => {
     const am = porId[p.id];
     if (!am) {
-      if (p.fonte !== 'lista') return '';
-      return `<div class="proc"><h3>${esc(p.nome)}</h3><div class="meta">${esc(p.lista || FONTES.lista.nome)}</div>
+      if (p.fonte !== 'lista' && p.fonte !== 'admitidos_lista') return '';
+      const compart = p.chaveLista ? a.processos.filter(q => q.chaveLista === p.chaveLista && q.id !== p.id).map(q => q.nome) : [];
+      return `<div class="proc"><h3>${esc(p.nome)}</h3><div class="meta">${esc(p.lista || FONTES.lista.nome)}${compart.length ? ` · a mesma importação alimenta: ${compart.map(esc).join(', ')}` : ''}</div>
         <span class="chip pend" style="align-self:flex-start">Aguardando lista</span>
-        <div class="rod">${isAdmin() && aberta ? `<button class="btn peq" data-imp="${p.id}">Importar lista e sortear</button><button class="btn sec peq" data-sem="${p.id}">Sem ocorrências</button>` : '<span class="suave pequeno">O administrador importa a lista</span>'}</div></div>`;
+        <div class="rod">${isAdmin() && aberta ? `<button class="btn peq" data-imp="${p.id}">${p.pct >= 100 ? 'Importar lista' : 'Importar lista e sortear'}</button><button class="btn sec peq" data-sem="${p.id}">${p.fonte === 'admitidos_lista' ? 'Sem mudanças (só admitidos)' : 'Sem ocorrências'}</button>` : '<span class="suave pequeno">O administrador importa a lista</span>'}</div></div>`;
     }
     const e = estat(am);
     const semPop = am.n === 0;
@@ -339,6 +344,11 @@ async function telaMes(mes) {
   $$('[data-imp]').forEach(b => b.onclick = () => importarLista(a, a.processos.find(p => p.id === b.dataset.imp)));
   $$('[data-sem]').forEach(b => b.onclick = async () => {
     const p = a.processos.find(x => x.id === b.dataset.sem);
+    if (p.fonte === 'admitidos_lista') {
+      if (!await modal(`<h2>Sem mudanças no mês</h2><p>Criar <b>${esc(p.nome)}</b> só com os admitidos da competência ${nomeMes(a.competencia)}?</p>`)) return;
+      await sortearLista(a, [p], { lista: [], nome: 'sem mudanças no mês' });
+      return;
+    }
     if (!await modal(`<h2>Sem ocorrências</h2><p>Registrar que <b>${esc(p.nome)}</b> não teve ocorrências na competência ${nomeMes(a.competencia)}?</p>`)) return;
     await B.salvarAmostra(mes, p.id, { procId: p.id, area: p.area, nome: p.nome, fonte: p.fonte, itens: p.itens, N: 0, n: 0, impressao: '—', pessoas: [], respostas: {}, sorteio: { uid: eu.uid, nome: eu.nome, em: new Date().toISOString() } });
     await B.registrarLog(mes, { ev: 'sem-ocorrencias', proc: p.id, uid: eu.uid, nome: eu.nome });
@@ -353,56 +363,81 @@ async function telaMes(mes) {
   $('#reabrir')?.addEventListener('click', () => reabrirMes(a));
 }
 
-// Importação de lista: o arquivo é lido assim que escolhido, e o sorteio só acontece na confirmação.
+// Importação de lista: os arquivos são lidos assim que escolhidos, e o sorteio só acontece na confirmação.
+// Vários arquivos podem ser escolhidos juntos (ex.: fatura do saúde + boletos do odonto); as pessoas são somadas.
 let listaLida = null, procImport = null;
 document.addEventListener('change', async ev => {
   if (ev.target.id !== 'larq') return;
-  const f = ev.target.files[0]; if (!f) return;
+  const fs = [...ev.target.files]; if (!fs.length) return;
   const res = $('#lres');
   try {
-    listaLida = { lista: lerLista(lerPlanilha(await f.arrayBuffer()), procImport), nome: f.name };
-    res.innerHTML = `<b>${esc(f.name)}</b>: ${listaLida.lista.length} pessoa(s) encontrada(s).`;
+    const listas = [], linhas = [];
+    for (const f of fs) { const l = lerLista(lerPlanilha(await f.arrayBuffer()), procImport); listas.push(l); linhas.push(`${esc(f.name)}: ${l.length}`); }
+    listaLida = { lista: mesclar(listas), nome: fs.map(f => f.name).join(', ') };
+    res.innerHTML = `${linhas.join('<br>')}<br><b>Total: ${listaLida.lista.length} pessoa(s)</b>`;
   } catch (e) { listaLida = null; res.innerHTML = `<span class="erro">${esc(e.message)}</span>`; }
 });
 
 async function importarLista(a, p) {
   listaLida = null; procImport = p.id;
+  const ams = await B.listarAmostras(a.id, null);
+  const grupo = [p, ...(p.chaveLista ? a.processos.filter(q => q.chaveLista === p.chaveLista && q.id !== p.id && !ams.some(x => x.procId === q.id)) : [])];
   const ok = await modal(`<h2>${esc(p.nome)}</h2>
-    <p class="pequeno suave">Fonte esperada: ${esc(p.lista || 'relatório com coluna Chapa')}. Competência ${nomeMes(a.competencia)}.</p>
-    <label class="drop"><input type="file" id="larq" accept=".xlsx,.xls,.csv">Clique para escolher o arquivo</label>
+    <p class="pequeno suave">${esc(p.lista || 'Relatório com coluna Chapa')}. Competência ${nomeMes(a.competencia)}.</p>
+    ${grupo.length > 1 ? `<p class="pequeno">Esta importação também cria: <b>${grupo.slice(1).map(q => esc(q.nome)).join(', ')}</b>.</p>` : ''}
+    <label class="drop"><input type="file" id="larq" accept=".xlsx,.xls,.csv" multiple>Clique para escolher o(s) arquivo(s)</label>
     <div id="lres" class="pequeno" style="margin-top:12px"></div>`, {
-    okTxt: 'Sortear amostra',
+    okTxt: p.pct >= 100 ? 'Importar' : 'Sortear amostra',
     onOk: () => {
       if (!listaLida) throw new Error('Escolha um arquivo válido primeiro.');
-      if (!listaLida.lista.length) throw new Error('A lista não tem nenhuma Chapa. Use “Sem ocorrências” se for o caso.');
+      if (!listaLida.lista.length && p.fonte !== 'admitidos_lista') throw new Error('Nenhuma pessoa encontrada no arquivo. Use “Sem ocorrências” se for o caso.');
       return true;
     },
   });
-  if (ok) await sortearLista(a, p, listaLida);
+  if (ok) await sortearLista(a, grupo, listaLida);
 }
 
-async function sortearLista(a, p, u) {
-  const base = await B.lerBase(a.id) || [];
+const INATIVO_RE = /afast|aposent|licen/i;
+async function sortearLista(a, procs, u) {
+  const bd = await B.lerBase(a.id) || {};
+  const base = Array.isArray(bd) ? bd : (bd.pessoas || []), desl = bd.desligados || [];
   const nn = s => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
-  const unico = (pares) => { const m = new Map(); for (const [k, b] of pares) m.set(k, m.has(k) ? null : b); return m; }; // repetido = ambíguo
-  const porId = new Map(base.map(b => [b.id, b]));
-  const porChapa = unico(base.map(b => [b.chapa, b]));
-  const porNomeAdm = unico(base.map(b => [`${nn(b.nome)}|${b.adm}`, b]));
-  const porNome = unico(base.map(b => [nn(b.nome), b]));
-  let fora = 0;
-  const pop = u.lista.map(x => {
-    const b = porId.get(x.id) || (x.chapa && porChapa.get(x.chapa)) || (x.adm && porNomeAdm.get(`${nn(x.nome)}|${x.adm}`)) || (!x.chapa && porNome.get(nn(x.nome)));
-    if (b) return { ...b, info: x.info || '' };
-    fora++;
-    return { ...x, chapa: x.chapa || '—', info: [x.info, 'não localizado entre os ativos da competência'].filter(Boolean).join(' · ') };
-  });
-  const n = tamanhoAmostra(pop.length, p.pct, p.min);
-  const am = sortear(pop, n, a.codigo, p.id).map((x, i) => ({ k: 'p' + i, id: x.id, chapa: x.chapa, nome: x.nome, cargo: x.cargo || '',
-    depto: x.depto || '', adm: x.adm || '', dem: x.dem || '', escala: x.escala || '', info: x.info || '' }));
-  await B.salvarAmostra(a.id, p.id, { procId: p.id, area: p.area, nome: p.nome, fonte: p.fonte, itens: p.itens, N: pop.length, n,
-    impressao: await impressao(pop.map(x => x.id)), arquivo: u.nome, pessoas: am, respostas: {}, sorteio: { uid: eu.uid, nome: eu.nome, em: new Date().toISOString() } });
-  await B.registrarLog(a.id, { ev: 'sorteio-lista', proc: p.id, arquivo: u.nome, N: pop.length, n, uid: eu.uid, nome: eu.nome });
-  toast(`${n} de ${pop.length} sorteados.${fora ? ` ${fora} da lista não estão entre os ativos da competência.` : ''}`);
+  const unico = pares => { const m = new Map(); for (const [k, b] of pares) m.set(k, m.has(k) ? null : b); return m; }; // repetido = ambíguo
+  const idx = l => ({ id: new Map(l.map(b => [b.id, b])), chapa: unico(l.map(b => [b.chapa, b])), nomeAdm: unico(l.map(b => [`${nn(b.nome)}|${b.adm}`, b])), nome: unico(l.map(b => [nn(b.nome), b])) });
+  const achar = (ix, x) => ix.id.get(x.id) || (x.chapa && ix.chapa.get(x.chapa)) || (x.adm && ix.nomeAdm.get(`${nn(x.nome)}|${x.adm}`)) || (!x.chapa && ix.nome.get(nn(x.nome))) || null;
+  const iAt = idx(base), iDe = idx(desl);
+  const { ini, fim } = (() => { const [y, m] = a.competencia.split('-').map(Number); return { ini: new Date(y, m - 1, 1), fim: new Date(y, m, 0) }; })();
+  const dataBR = s => { const [d, m, y] = String(s || '').split('/').map(Number); return y ? new Date(y, m - 1, d) : null; };
+  const ts = new Date().toISOString(), por = { uid: eu.uid, nome: eu.nome };
+  let msg = [];
+  for (const p of procs) {
+    let fora = 0; const excluidos = [];
+    let pop = [];
+    for (const x of u.lista) {
+      const b = achar(iAt, x);
+      if (b) {
+        if (p.excluirInativos && (INATIVO_RE.test(b.status) || b.dem)) { excluidos.push({ nome: b.nome, chapa: b.chapa, motivo: b.dem ? `desligado em ${b.dem}` : b.status }); continue; }
+        pop.push({ ...b, info: x.info || '' }); continue;
+      }
+      const d = achar(iDe, x);
+      if (d && p.excluirInativos) { excluidos.push({ nome: d.nome, chapa: d.chapa, motivo: `desligado em ${d.dem}` }); continue; }
+      fora++;
+      pop.push({ ...x, chapa: d?.chapa || x.chapa || '—', info: [x.info, d ? `desligado em ${d.dem}` : 'não localizado na base do MIX'].filter(Boolean).join(' · ') });
+    }
+    if (p.fonte === 'admitidos_lista') {
+      const adm = base.filter(b => { const d = dataBR(b.adm); return d && d >= ini && d <= fim; }).map(b => ({ ...b, info: `Admissão em ${b.adm}` }));
+      const ids = new Set(pop.map(x => x.id));
+      pop = [...adm.filter(b => !ids.has(b.id)), ...pop.map(x => ({ ...x, info: `Mudança · ${x.info}` }))];
+    }
+    const n = tamanhoAmostra(pop.length, p.pct, p.min);
+    const am = sortear(pop, n, a.codigo, p.id).map((x, i) => ({ k: 'p' + i, id: x.id, chapa: x.chapa, nome: x.nome, cargo: x.cargo || '',
+      depto: x.depto || '', adm: x.adm || '', dem: x.dem || '', escala: x.escala || '', info: x.info || '' }));
+    await B.salvarAmostra(a.id, p.id, { procId: p.id, area: p.area, nome: p.nome, fonte: p.fonte, itens: p.itens, N: pop.length, n,
+      impressao: await impressao(pop.map(x => x.id)), arquivo: u.nome, pessoas: am, excluidos, respostas: {}, sorteio: { ...por, em: ts } });
+    await B.registrarLog(a.id, { ev: 'sorteio-lista', proc: p.id, arquivo: u.nome, N: pop.length, n, excluidos: excluidos.length, ...por });
+    msg.push(`${p.nome}: ${n} de ${pop.length}${excluidos.length ? `, ${excluidos.length} excluído(s)` : ''}${fora ? `, ${fora} fora dos ativos` : ''}`);
+  }
+  toast(msg.join(' · '));
   telaMes(a.id);
 }
 
@@ -502,6 +537,8 @@ async function telaProc(mes, procId) {
     <div class="cab"><div><div class="legenda"><a href="#/mes/${mes}">${nomeMes(mes)}</a> · ${areaNome(am.area)}</div><h1>${esc(am.nome)}</h1>
       <div class="suave pequeno">${am.fonte === 'unico' ? 'Checklist único do mês' : `População ${am.N} · amostra ${am.n} · impressão da população ${esc(am.impressao)}${am.arquivo ? ` · arquivo ${esc(am.arquivo)}` : ''}`}</div></div>
       <div class="acoes"><label class="filtro"><input type="checkbox" id="soPend"> Mostrar só pendentes</label><a class="btn sec" href="#/mes/${mes}">Voltar</a></div></div>
+    ${am.excluidos?.length ? `<details class="cartao pequeno" style="padding:12px 16px"><summary style="cursor:pointer"><b>${am.excluidos.length} pessoa(s) excluída(s) da lista</b> (afastados, aposentados, licenças ou desligados)</summary>
+      <p style="margin:8px 0 0">${am.excluidos.map(x => `${esc(x.nome)}${x.chapa && x.chapa !== '—' ? ` (${esc(x.chapa)})` : ''}: ${esc(x.motivo)}`).join('<br>')}</p></details>` : ''}
     ${!editavel ? `<div class="avisos" style="margin-bottom:16px">${a.status !== 'aberta' ? 'Mês fechado: somente leitura.' : 'Você tem acesso somente leitura a esta área.'}</div>` : ''}
     <div class="cartao" style="padding:16px"><div id="prog" class="pequeno" style="margin-bottom:8px"></div><div class="barra"><i id="barra"></i></div></div>
     <div id="corpo"></div>`, 'painel');
@@ -576,12 +613,12 @@ async function telaRelatorio(mes) {
 
       <h2>Amostras sorteadas</h2>
       <div class="tabela-wrap"><table><thead><tr><th>Processo</th><th>Pessoas sorteadas</th></tr></thead><tbody>
-        ${est.filter(o => o.am && o.am.fonte !== 'unico').map(o => `<tr><td>${esc(o.p.nome)}<div class="suave pequeno">${o.am.n} de ${o.am.N} · impressão ${esc(o.am.impressao)}</div></td>
+        ${est.filter(o => o.am && o.am.fonte !== 'unico').map(o => `<tr><td>${esc(o.p.nome)}<div class="suave pequeno">${o.am.n} de ${o.am.N} · impressão ${esc(o.am.impressao)}${o.am.excluidos?.length ? ` · ${o.am.excluidos.length} excluído(s): ${o.am.excluidos.map(x => `${esc(x.nome)} (${esc(x.motivo)})`).join('; ')}` : ''}</div></td>
           <td class="pequeno">${o.am.pessoas.map(pe => `${esc(pe.nome)} (${esc(pe.chapa)})`).join('; ') || '—'}</td></tr>`).join('')}
       </tbody></table></div>
 
       <h2>Metodologia</h2>
-      <p class="pequeno">A auditoria do mês ${nomeMes(mes)} avalia a competência ${nomeMes(a.competencia)}, já fechada. Para cada processo, a população foi formada a partir da base de funcionários exportada do MIX (ativos, admitidos, desligados, vencimentos de experiência ou menores na competência) ou de lista específica importada. A amostra corresponde ao percentual configurado da população, respeitado o mínimo, e foi sorteada de forma aleatória e reprodutível a partir do código de sorteio <b>${esc(a.codigo)}</b>. A “impressão” de cada população (SHA-256 das Chapas) permite comprovar que a base usada não foi alterada. A conformidade é calculada como itens conformes ÷ (conformes + não conformes); itens “não se aplica” não entram no cálculo.</p>
+      <p class="pequeno">A auditoria do mês ${nomeMes(mes)} avalia a competência ${nomeMes(a.competencia)}, já fechada. Para cada processo, a população foi formada a partir da base de funcionários exportada do MIX (ativos, admitidos, desligados, vencimentos de experiência ou menores na competência) ou de lista específica importada. A amostra corresponde ao percentual configurado da população, respeitado o mínimo, e foi sorteada de forma aleatória e reprodutível a partir do código de sorteio <b>${esc(a.codigo)}</b>. A “impressão” de cada população (SHA-256 das Chapas) permite comprovar que a base usada não foi alterada. Processos configurados com 100% verificam toda a população, sem sorteio. A conformidade é calculada como itens conformes ÷ (conformes + não conformes); itens “não se aplica” não entram no cálculo.</p>
 
       <div class="assin"><div>Gerente de Recursos Humanos</div><div>Auditor(es)</div></div>
     </article>`, 'painel');
@@ -680,11 +717,11 @@ async function telaConfig() {
     });
     const vazio = nova.find(p => !p.itens.length);
     if (vazio) { toast(`“${vazio.nome}” precisa de pelo menos um item.`, true); return; }
-    await B.salvarConfig(nova); catalogo = nova; toast('Configurações salvas.'); telaConfig();
+    await B.salvarConfig(nova, VERSAO_CATALOGO); catalogo = nova; toast('Configurações salvas.'); telaConfig();
   };
   $('#padrao').onclick = async () => {
     if (!await modal('<h2>Restaurar a configuração padrão?</h2><p>Percentuais, fontes e itens voltam ao padrão original.</p>', { perigo: true, okTxt: 'Restaurar' })) return;
-    await B.salvarConfig(structuredClone(PROCESSOS_PADRAO)); telaConfig();
+    await B.salvarConfig(structuredClone(PROCESSOS_PADRAO), VERSAO_CATALOGO); telaConfig();
   };
 }
 

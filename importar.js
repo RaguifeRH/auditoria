@@ -37,7 +37,7 @@ export const isoData = d => d ? `${d.getFullYear()}-${String(d.getMonth() + 1).p
 
 // Localiza a linha de cabeçalho e devolve { idx: {campo: coluna}, linha }
 function acharCabecalho(linhas, exigidos) {
-  for (let i = 0; i < Math.min(linhas.length, 60); i++) {
+  for (let i = 0; i < Math.min(linhas.length, 200); i++) {
     const cels = linhas[i].map(norm);
     if (exigidos.every(e => cels.some(c => c === e || c.startsWith(e)))) return { linha: i, cels };
   }
@@ -166,20 +166,97 @@ function lerPlanoSaude(linhas, h, procId) {
   const out = [];
   for (const [nome, f] of fam) {
     const canc = f.cancel ? ' · beneficiário cancelado na fatura' : '';
-    if (procId === 'planos') { if (f.deps.size) out.push({ id: `|${norm(nome)}|`, chapa: '', nome, info: `${f.deps.size} dependente(s) · mensalidade dos dependentes ${brl(f.cppDep)}${canc}` }); }
+    if (procId === 'planos') { if (f.deps.size) out.push({ id: `|${norm(nome)}|`, chapa: '', nome, info: `Saúde: ${f.deps.size} dependente(s), mensalidade ${brl(f.cppDep)}${canc}` }); }
     else if (f.nCop) out.push({ id: `|${norm(nome)}|`, chapa: '', nome, info: `coparticipação ${brl(f.cop)} (${f.nCop} lançamento(s) da família)${canc}` });
   }
   return out;
 }
 
+const brl = v => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+
+// Boleto do plano odontológico (Bradesco Dental, aba "Table 1"): certificado /00 = titular, /01+ = dependentes.
+// O nome é sempre o do titular. Linhas com valor negativo (estornos) são desconsideradas.
+function lerOdonto(linhas, h) {
+  const c = { cert: col(h.cels, 'certif.'), nome: h.cels.findIndex(x => x.includes('nome segurado')), par: col(h.cels, 'paren.'), valor: col(h.cels, 'valor') };
+  const fam = new Map();
+  let cert = '';
+  for (const r of linhas.slice(h.linha + 1)) {
+    if (r[c.cert]) cert = String(r[c.cert]).trim();
+    const nome = String(r[c.nome] || '').trim(), v = Number(r[c.valor]) || 0;
+    if (!nome || v <= 0) continue;
+    const f = fam.get(nome) || { deps: new Set(), val: 0 };
+    if (String(r[c.par] || '').trim() || !/\/00$/.test(cert)) { f.deps.add(cert); f.val += v; }
+    fam.set(nome, f);
+  }
+  return [...fam].filter(([, f]) => f.deps.size).map(([nome, f]) => ({ id: `|${norm(nome)}|`, chapa: '', nome, info: `Odonto: ${f.deps.size} dependente(s), mensalidade ${brl(f.val)}` }));
+}
+
+// Pendências de exames periódicos (sistema de saúde ocupacional): Funcionário, Cargo, Procedimento.
+function lerPeriodicos(linhas, h) {
+  const c = { nome: col(h.cels, 'funcionario'), cargo: col(h.cels, 'cargo'), proc: col(h.cels, 'procedimento') };
+  const out = new Map();
+  for (const r of linhas.slice(h.linha + 1)) {
+    const nome = String(r[c.nome] || '').replace(/\s+/g, ' ').trim(); if (!nome) continue;
+    const id = `|${norm(nome)}|`;
+    const x = out.get(id) || { id, chapa: '', nome: nome.toUpperCase(), cargo: String(r[c.cargo] || '').trim(), _p: [] };
+    if (r[c.proc]) x._p.push(String(r[c.proc]).replace(/\s*-\s*Ocupacional/i, '').trim());
+    out.set(id, x);
+  }
+  return [...out.values()].map(({ _p, ...x }) => ({ ...x, info: `Exames pendentes: ${_p.join(', ')}` }));
+}
+
+// Conferência de Alteração de Cargo / de Estrutura (MIX). Ignora o motivo "Admissão".
+function lerMudancas(linhas) {
+  const out = new Map();
+  let c = null;
+  for (const r of linhas) {
+    const cels = r.map(norm);
+    if (cels.includes('chapa') && cels.some(x => x.startsWith('motivo alteracao'))) {
+      c = { chapa: col(cels, 'chapa'), nome: col(cels, 'nome'), ca: col(cels, 'cargo anterior'), cn: col(cels, 'cargo atual'),
+        ea: col(cels, 'estrutura anterior'), en: col(cels, 'estrutura atual'), cargo: col(cels, 'cargo'), data: col(cels, 'data alteracao'), mot: col(cels, 'motivo alteracao') };
+      continue;
+    }
+    if (!c) continue;
+    const chapa = chapaDe(r[c.chapa]); if (!CHAPA_RE.test(chapa)) continue;
+    const mot = String(r[c.mot] || '').trim();
+    if (norm(mot) === 'admissao') continue;
+    const nome = String(r[c.nome] || '').trim(), id = chave(chapa, nome);
+    const de = c.ca >= 0 ? `Cargo: ${r[c.ca] || '—'} → ${r[c.cn] || '—'}` : `Setor: ${r[c.ea] || '—'} → ${r[c.en] || '—'}`;
+    const desc = `${de} (${mot}, ${fmtData(parseData(r[c.data])) || '—'})`;
+    const x = out.get(id) || { id, chapa, nome, cargo: String(r[c.cn >= 0 ? c.cn : c.cargo] || '').trim(), info: '' };
+    x.info = [x.info, desc].filter(Boolean).join(' · ');
+    out.set(id, x);
+  }
+  if (!c) return null;
+  return [...out.values()];
+}
+
+// Junta listas de vários arquivos da mesma importação, somando as informações por pessoa
+export function mesclar(listas) {
+  const out = new Map();
+  for (const l of listas) for (const x of l) {
+    const y = out.get(x.id);
+    if (!y) out.set(x.id, { ...x });
+    else y.info = [y.info, x.info].filter(Boolean).join(' · ');
+  }
+  return [...out.values()];
+}
+
 // Lista genérica: qualquer relatório com coluna "Chapa" (ex.: Relação de Líquidos de Férias).
 // Ignora cabeçalhos repetidos, linhas de filial/totais e colunas bancárias.
-// Também reconhece o arquivo do consignado e a fatura do plano de saúde.
+// Também reconhece: consignado, fatura do plano de saúde, boleto odontológico,
+// pendências de periódicos e conferência de alteração de cargo/estrutura.
 export function lerLista(linhas, procId) {
   const hc = acharCabecalho(linhas, ['nometrabalhador', 'dataadmissao']);
   if (hc) return lerConsignado(linhas, hc);
   const hs = acharCabecalho(linhas, ['respfamilia', 'dsevento']);
   if (hs) return lerPlanoSaude(linhas, hs, procId);
+  const ho = acharCabecalho(linhas, ['certif.', 'paren.']);
+  if (ho) return procId === 'planos' ? lerOdonto(linhas, ho) : [];
+  const hp = acharCabecalho(linhas, ['funcionario', 'procedimento']);
+  if (hp) return lerPeriodicos(linhas, hp);
+  const mu = lerMudancas(linhas);
+  if (mu) return mu;
   const out = new Map();
   let c = null;
   for (const r of linhas) {

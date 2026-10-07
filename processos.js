@@ -2,6 +2,9 @@
 // O administrador pode ajustar % de amostra, mínimo, fonte e itens em Configurações.
 // Alterações valem para os meses abertos depois da mudança (cada mês guarda uma cópia dos itens).
 
+// Versão do catálogo padrão: ao mudar, configurações salvas com versão anterior são substituídas.
+export const VERSAO_CATALOGO = 2;
+
 export const AREAS = [
   { id: 'dp',  nome: 'Departamento Pessoal' },
   { id: 'sst', nome: 'Segurança do Trabalho' },
@@ -16,7 +19,8 @@ export const FONTES = {
   demitidos:   { nome: 'Desligados na competência', base: true },
   experiencia: { nome: 'Vencimento de experiência (45/90 dias) na competência', base: true },
   menores:     { nome: 'Menores de 18 anos e aprendizes ativos', base: true },
-  lista:       { nome: 'Lista importada (relatório com coluna Chapa)', base: false },
+  lista:       { nome: 'Lista importada', base: false },
+  admitidos_lista: { nome: 'Admitidos na competência + lista importada', base: false },
   unico:       { nome: 'Checklist único do mês (sem sorteio)', base: false },
 };
 
@@ -85,17 +89,8 @@ export const PROCESSOS_PADRAO = [
       'Desconto dentro do limite previsto na política/contrato do plano',
       'Desligados/cancelados: coparticipação residual descontada na rescisão ou cobrada',
     ] },
-  { id: 'disciplinar', area: 'dp', nome: 'Advertências, faltas e suspensões', fonte: 'lista', pct: 20, min: 2,
-    lista: 'Relação de ocorrências disciplinares e faltas do mês',
-    itens: [
-      'Advertência/suspensão assinada (ou com 2 testemunhas em caso de recusa)',
-      'Suspensão de no máximo 30 dias',
-      'Desconto de falta e DSR somente em falta injustificada',
-      'Atestados recebidos não foram descontados',
-      'Desconto em folha corresponde à ocorrência registrada',
-    ] },
   { id: 'planos', area: 'dp', nome: 'Planos de saúde e odontológico (dependentes)', fonte: 'lista', pct: 20, min: 2,
-    lista: 'Fatura da operadora de saúde da competência (titulares com dependentes)',
+    lista: 'Fatura do plano de saúde + boletos do plano odontológico (selecione todos os arquivos juntos)',
     itens: [
       'Mensalidade (CPP) dos dependentes descontada do titular igual à fatura',
       'Titular sem desconto indevido da própria mensalidade (custeada pela empresa)',
@@ -164,12 +159,12 @@ export const PROCESSOS_PADRAO = [
       'Periodicidade de troca respeitada',
       'Orientação de uso e conservação registrada',
     ] },
-  { id: 'os', area: 'sst', nome: 'Ordem de serviço com ciência', fonte: 'admitidos', pct: 20, min: 3,
+  { id: 'os', area: 'sst', nome: 'Ordem de serviço com ciência', fonte: 'admitidos_lista', pct: 100, min: 0, chaveLista: 'mudancas',
+    lista: 'Admitidos da competência + Conferência de Alteração de Cargo e de Estrutura (MIX)',
     itens: [
-      'Ordem de serviço emitida para a função',
-      'Ciência/assinatura do trabalhador antes do início',
-      'Riscos e medidas de prevenção coerentes com o PGR',
-      'OS atualizada em caso de mudança de função',
+      'Ordem de serviço emitida para a função atual',
+      'Ciência/assinatura do trabalhador antes do início na função',
+      'Riscos e medidas de prevenção coerentes com o PGR da função/setor',
     ] },
   { id: 'integracao', area: 'sst', nome: 'Integração e informação de riscos', fonte: 'admitidos', pct: 20, min: 3,
     itens: [
@@ -180,7 +175,7 @@ export const PROCESSOS_PADRAO = [
     ] },
 
   // ---------------- AMBULATÓRIO ----------------
-  { id: 'aso_adm', area: 'amb', nome: 'ASO admissional', fonte: 'admitidos', pct: 20, min: 3,
+  { id: 'aso_adm', area: 'amb', nome: 'ASO admissional', fonte: 'admitidos', pct: 100, min: 0,
     itens: [
       'ASO realizado antes do início das atividades',
       'Exames complementares exigidos pelo PCMSO realizados',
@@ -189,31 +184,24 @@ export const PROCESSOS_PADRAO = [
       ASO_MIN,
       'Evento S-2220 enviado ao eSocial',
     ] },
-  { id: 'aso_dem', area: 'amb', nome: 'ASO demissional', fonte: 'demitidos', pct: 25, min: 3,
+  { id: 'aso_dem', area: 'amb', nome: 'ASO demissional', fonte: 'demitidos', pct: 100, min: 0,
     itens: [
       'ASO realizado em até 10 dias do término do contrato, ou dispensa válida (último exame há menos de 90 dias)',
       'Exames complementares exigidos realizados',
       ASO_MIN,
       'Evento S-2220 enviado ao eSocial',
     ] },
-  { id: 'aso_per', area: 'amb', nome: 'ASO periódico', fonte: 'ativos', pct: 2, min: 3,
+  { id: 'aso_per', area: 'amb', nome: 'ASO periódico (pendências)', fonte: 'lista', pct: 100, min: 0, excluirInativos: true,
+    lista: 'Pendências de exames periódicos das empresas (selecione todos os arquivos juntos). Afastados, aposentados por invalidez, licenças e desligados são excluídos automaticamente.',
     itens: [
-      'ASO periódico dentro da validade',
-      'Periodicidade conforme o PCMSO',
-      'Exames complementares realizados',
-      ASO_MIN,
-      'Evento S-2220 enviado ao eSocial',
+      'Convocação para o exame registrada',
+      'Exame agendado ou realizado',
+      'Se o vencimento já passou: justificativa e plano de ação para regularizar',
+      'Trabalhador exposto a risco com exame vencido: restrição da atividade avaliada',
+      'Após a realização: ASO com conteúdo mínimo e S-2220 enviado',
     ] },
-  { id: 'aso_ret', area: 'amb', nome: 'ASO de retorno ao trabalho', fonte: 'lista', pct: 30, min: 2,
-    lista: 'Relação de retornos de afastamento de 30 dias ou mais',
-    itens: [
-      'ASO de retorno realizado antes de reassumir a função',
-      'Afastamento e retorno registrados no eSocial (S-2230)',
-      ASO_MIN,
-      'Restrições/recomendações comunicadas ao gestor (se houver)',
-    ] },
-  { id: 'aso_mud', area: 'amb', nome: 'ASO de mudança de risco', fonte: 'lista', pct: 30, min: 2,
-    lista: 'Relação de mudanças de função/setor do mês',
+  { id: 'aso_mud', area: 'amb', nome: 'ASO de mudança de risco', fonte: 'lista', pct: 100, min: 0, chaveLista: 'mudancas',
+    lista: 'Conferência de Alteração de Cargo e de Estrutura (MIX), selecione os dois arquivos juntos. O motivo "Admissão" é ignorado.',
     itens: [
       'A mudança alterou o risco ocupacional (se não, marcar "Não se aplica" nos demais)',
       'ASO de mudança de risco realizado antes da mudança',
