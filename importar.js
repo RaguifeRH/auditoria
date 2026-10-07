@@ -127,9 +127,29 @@ export function juntarBase(func, comp) {
   return { base, avisos };
 }
 
+// Arquivo do consignado (Crédito do Trabalhador, exportado do portal): uma linha por contrato,
+// sem Chapa. Agrupa por trabalhador e guarda só nome, admissão e um resumo dos contratos (CPF descartado).
+function lerConsignado(linhas, h) {
+  const c = { nome: col(h.cels, 'nometrabalhador'), adm: col(h.cels, 'dataadmissao'), parcela: col(h.cels, 'valorparcela'),
+    banco: col(h.cels, 'ifconcessora.descricao') };
+  const brl = v => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+  const out = new Map();
+  for (const r of linhas.slice(h.linha + 1)) {
+    const nome = String(r[c.nome] || '').trim(); if (!nome) continue;
+    const adm = parseData(r[c.adm]);
+    const id = `|${norm(nome)}|${adm ? fmtData(adm) : ''}`;
+    const x = out.get(id) || { id, chapa: '', nome, adm: adm ? fmtData(adm) : '', _n: 0, _v: 0, _b: new Set() };
+    x._n++; x._v += Number(r[c.parcela]) || 0; if (c.banco >= 0 && r[c.banco]) x._b.add(String(r[c.banco]).trim());
+    out.set(id, x);
+  }
+  return [...out.values()].map(({ _n, _v, _b, ...x }) => ({ ...x, info: `${_n} contrato(s) · parcelas ${brl(_v)} · ${[..._b].join(', ')}` }));
+}
+
 // Lista genérica: qualquer relatório com coluna "Chapa" (ex.: Relação de Líquidos de Férias).
 // Ignora cabeçalhos repetidos, linhas de filial/totais e colunas bancárias.
 export function lerLista(linhas) {
+  const hc = acharCabecalho(linhas, ['nometrabalhador', 'dataadmissao']);
+  if (hc) return lerConsignado(linhas, hc);
   const out = new Map();
   let c = null;
   for (const r of linhas) {
@@ -144,6 +164,6 @@ export function lerLista(linhas) {
     if (out.has(id)) continue;
     out.set(id, { id, chapa, nome, cargo: c.cargo >= 0 ? String(r[c.cargo] || '').trim() : '' });
   }
-  if (!c) throw new Error('Nenhuma coluna "Chapa" encontrada no arquivo.');
+  if (!c) throw new Error('Formato não reconhecido: o arquivo precisa ter uma coluna "Chapa" (ou ser o arquivo do consignado do portal).');
   return [...out.values()];
 }

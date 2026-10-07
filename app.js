@@ -383,16 +383,26 @@ async function importarLista(a, p) {
 
 async function sortearLista(a, p, u) {
   const base = await B.lerBase(a.id) || [];
-  const porId = new Map(base.map(b => [b.id, b])), porChapa = new Map();
-  for (const b of base) porChapa.set(b.chapa, porChapa.has(b.chapa) ? null : b); // Chapa repetida = ambígua
-  const pop = u.lista.map(x => porId.get(x.id) || porChapa.get(x.chapa) || x);
+  const nn = s => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
+  const unico = (pares) => { const m = new Map(); for (const [k, b] of pares) m.set(k, m.has(k) ? null : b); return m; }; // repetido = ambíguo
+  const porId = new Map(base.map(b => [b.id, b]));
+  const porChapa = unico(base.map(b => [b.chapa, b]));
+  const porNomeAdm = unico(base.map(b => [`${nn(b.nome)}|${b.adm}`, b]));
+  const porNome = unico(base.map(b => [nn(b.nome), b]));
+  let fora = 0;
+  const pop = u.lista.map(x => {
+    const b = porId.get(x.id) || (x.chapa && porChapa.get(x.chapa)) || (x.adm && porNomeAdm.get(`${nn(x.nome)}|${x.adm}`)) || (!x.chapa && porNome.get(nn(x.nome)));
+    if (b) return { ...b, info: x.info || '' };
+    fora++;
+    return { ...x, chapa: x.chapa || '—', info: [x.info, 'não localizado entre os ativos da competência'].filter(Boolean).join(' · ') };
+  });
   const n = tamanhoAmostra(pop.length, p.pct, p.min);
   const am = sortear(pop, n, a.codigo, p.id).map((x, i) => ({ k: 'p' + i, id: x.id, chapa: x.chapa, nome: x.nome, cargo: x.cargo || '',
-    depto: x.depto || '', adm: x.adm || '', dem: x.dem || '', escala: x.escala || '' }));
+    depto: x.depto || '', adm: x.adm || '', dem: x.dem || '', escala: x.escala || '', info: x.info || '' }));
   await B.salvarAmostra(a.id, p.id, { procId: p.id, area: p.area, nome: p.nome, fonte: p.fonte, itens: p.itens, N: pop.length, n,
     impressao: await impressao(pop.map(x => x.id)), arquivo: u.nome, pessoas: am, respostas: {}, sorteio: { uid: eu.uid, nome: eu.nome, em: new Date().toISOString() } });
   await B.registrarLog(a.id, { ev: 'sorteio-lista', proc: p.id, arquivo: u.nome, N: pop.length, n, uid: eu.uid, nome: eu.nome });
-  toast(`${n} de ${pop.length} sorteados.`);
+  toast(`${n} de ${pop.length} sorteados.${fora ? ` ${fora} da lista não estão entre os ativos da competência.` : ''}`);
   telaMes(a.id);
 }
 
@@ -447,8 +457,8 @@ async function telaProc(mes, procId) {
     const e = estat(am);
     const pessoas = am.pessoas.filter(p => !soPend || am.itens.some((_, i) => !am.respostas?.[p.k]?.[i]));
     $('#corpo').innerHTML = pessoas.length ? pessoas.map(p => `
-      <section class="pessoa"><div class="pessoa-cab"><div><b>${esc(p.nome)}</b>${p.chapa !== '—' ? ` <span class="det">· Chapa ${esc(p.chapa)}</span>` : ''}
-        <div class="det">${[p.cargo, p.depto].filter(Boolean).map(esc).join(' · ')}</div></div>
+      <section class="pessoa"><div class="pessoa-cab"><div><b>${esc(p.nome)}</b>${p.chapa && p.chapa !== '—' ? ` <span class="det">· Chapa ${esc(p.chapa)}</span>` : ''}
+        <div class="det">${[p.cargo, p.depto].filter(Boolean).map(esc).join(' · ')}</div>${p.info ? `<div class="det"><b>${esc(p.info)}</b></div>` : ''}</div>
         <div class="det dir">${p.adm ? `Admissão ${esc(p.adm)}` : ''}${p.dem ? `<br>Desligamento ${esc(p.dem)}` : ''}${p.escala ? `<br>${esc(p.escala)}` : ''}</div></div>
         ${am.itens.map((it, i) => {
           const r = am.respostas?.[p.k]?.[i];
