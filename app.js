@@ -1,8 +1,8 @@
-import { firebaseConfig } from './config.js';
-import { criarBackend } from './data.js';
-import { AREAS, FONTES, PROCESSOS_PADRAO, VERSAO_CATALOGO, areaNome } from './processos.js';
-import { lerPlanilha, identificar, lerFuncionarios, lerComplementar, juntarBase, lerLista, mesclar, fmtData } from './importar.js';
-import { nomeMes, competenciaDe, gerarCodigo, impressao, tamanhoAmostra, sortear, populacao } from './sorteio.js';
+import { firebaseConfig } from './config.js?v=4';
+import { criarBackend } from './data.js?v=4';
+import { AREAS, FONTES, PROCESSOS_PADRAO, VERSAO_CATALOGO, areaNome } from './processos.js?v=4';
+import { lerPlanilha, identificar, lerFuncionarios, lerComplementar, juntarBase, lerLista, mesclar, fmtData } from './importar.js?v=4';
+import { nomeMes, competenciaDe, gerarCodigo, impressao, tamanhoAmostra, sortear, populacao } from './sorteio.js?v=4';
 
 // ======================= utilidades =======================
 const $ = (s, el = document) => el.querySelector(s);
