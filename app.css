@@ -156,6 +156,22 @@ td.num, th.num { text-align: right; white-space: nowrap; }
 
 /* ---------- gráfico ---------- */
 .graf { width: 100%; height: auto; display: block; }
+.g-grade { stroke: #E4E4E4; stroke-width: 1; }
+.g-eixo { font-size: 11px; fill: var(--cinza); font-family: inherit; }
+.g-linha { fill: none; stroke: var(--verde); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.g-cheio { fill: var(--verde); stroke: var(--branco); stroke-width: 2; }
+.g-vazado { fill: var(--branco); stroke: var(--verde); stroke-width: 2; }
+.g-rotulo { font-size: 12px; font-weight: 600; fill: var(--texto); font-family: inherit; }
+.g-ponto:hover .g-cheio, .g-ponto:focus .g-cheio, .g-ponto:hover .g-vazado, .g-ponto:focus .g-vazado { r: 7; }
+.g-ponto:focus { outline: none; }
+.grade-areas { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+@media (max-width: 760px) { .grade-areas { grid-template-columns: 1fr; } }
+.grade-areas .cartao { margin-bottom: 0; }
+.grade-areas + .cartao { margin-top: var(--s4); }
+.var { font-size: 13px; font-weight: 600; white-space: nowrap; }
+.var.sobe { color: var(--verde); }
+.var.desce { color: var(--nc); }
+.var.igual { color: var(--cinza); }
 
 /* ---------- relatório ---------- */
 .rel { background: var(--branco); max-width: 1000px; margin: 0 auto; padding: var(--s10); border: 1px solid var(--borda); }

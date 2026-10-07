@@ -1,8 +1,8 @@
-import { firebaseConfig } from './config.js?v=4';
-import { criarBackend } from './data.js?v=4';
-import { AREAS, FONTES, PROCESSOS_PADRAO, VERSAO_CATALOGO, areaNome } from './processos.js?v=4';
-import { lerPlanilha, identificar, lerFuncionarios, lerComplementar, juntarBase, lerLista, mesclar, fmtData } from './importar.js?v=4';
-import { nomeMes, competenciaDe, gerarCodigo, impressao, tamanhoAmostra, sortear, populacao } from './sorteio.js?v=4';
+import { firebaseConfig } from './config.js?v=5';
+import { criarBackend } from './data.js?v=5';
+import { AREAS, FONTES, PROCESSOS_PADRAO, VERSAO_CATALOGO, areaNome } from './processos.js?v=5';
+import { lerPlanilha, identificar, lerFuncionarios, lerComplementar, juntarBase, lerLista, mesclar, fmtData } from './importar.js?v=5';
+import { nomeMes, competenciaDe, gerarCodigo, impressao, tamanhoAmostra, sortear, populacao } from './sorteio.js?v=5';
 
 // ======================= utilidades =======================
 const $ = (s, el = document) => el.querySelector(s);
@@ -74,7 +74,7 @@ function somar(lista) {
 
 // ======================= casca =======================
 function casca(conteudo, ativo) {
-  const links = [['#/painel', 'Painel', 'painel']];
+  const links = [['#/painel', 'Painel', 'painel'], ['#/dashboard', 'Dashboard', 'dashboard']];
   if (isAdmin()) links.push(['#/usuarios', 'Usuários', 'usuarios'], ['#/config', 'Configurações', 'config']);
   app.innerHTML = `
     ${B.modo === 'demo' ? '<div class="faixa-demo">Modo demonstração: os dados ficam só neste navegador. Configure o Firebase para uso real.</div>' : ''}
@@ -661,6 +661,81 @@ async function telaRelatorio(mes) {
   $('#imprimir')?.addEventListener('click', () => window.print());
 }
 
+// ======================= dashboard =======================
+// Série mensal de conformidade: meses fechados usam o resumo gravado; o mês aberto é calculado na hora (parcial).
+async function telaDashboard() {
+  casca('<div class="carregando">Carregando…</div>', 'dashboard');
+  const auds = (await B.listarAuditorias()).sort((a, b) => a.id.localeCompare(b.id)).slice(-12);
+  const areasVis = AREAS.filter(ar => isAdmin() || (eu.areas || []).includes(ar.id));
+  const meses = [];
+  for (const a of auds) {
+    if (a.status === 'fechada' && a.resumo) meses.push({ id: a.id, comp: a.competencia, parcial: false, geral: a.resumo.geral, porArea: a.resumo.porArea, porProc: a.resumo.porProc, processos: a.processos });
+    else {
+      const ams = await B.listarAmostras(a.id, minhasAreas());
+      const porProc = Object.fromEntries(ams.map(x => [x.procId, estat(x)]));
+      const porArea = Object.fromEntries(AREAS.map(ar => [ar.id, somar(ams.filter(x => x.area === ar.id).map(estat))]));
+      meses.push({ id: a.id, comp: a.competencia, parcial: true, geral: somar(Object.values(porProc)), porArea, porProc, processos: a.processos });
+    }
+  }
+  // para quem não é admin, o "geral" considera só as áreas dele
+  if (!isAdmin()) for (const m of meses) m.geral = somar(areasVis.map(ar => m.porArea?.[ar.id]).filter(Boolean));
+  if (!meses.length) { casca('<div class="cab"><div><div class="legenda">Dashboard</div><h1>Evolução da conformidade</h1></div></div><div class="cartao"><p class="suave">Ainda não há auditorias. O dashboard aparece depois da primeira auditoria aberta.</p></div>', 'dashboard'); return; }
+
+  const ult = meses[meses.length - 1], ant = meses[meses.length - 2];
+  const delta = (a, b) => (a?.conf == null || b?.conf == null) ? null : (a.conf - b.conf) * 100;
+  const deltaTxt = d => d == null ? '<span class="suave pequeno">sem mês anterior</span>'
+    : Math.abs(d) < 0.05 ? '<span class="var igual">= 0,0 p.p.</span>'
+    : `<span class="var ${d > 0 ? 'sobe' : 'desce'}">${d > 0 ? '▲' : '▼'} ${Math.abs(d).toFixed(1).replace('.', ',')} p.p.</span>`;
+  const rot = m => `${MES_CURTO[+m.id.slice(5) - 1]}/${m.id.slice(2, 4)}${m.parcial ? '*' : ''}`;
+
+  const serie = sel => meses.map(m => ({ rot: rot(m), v: sel(m)?.conf ?? null, parcial: m.parcial, nc: sel(m)?.NC ?? 0, resp: sel(m)?.resp ?? 0 }));
+  const procsUlt = (ult.processos || []).filter(p => areasVis.some(ar => ar.id === p.area));
+  const ultimos = meses.slice(-6);
+
+  casca(`
+    <div class="cab"><div><div class="legenda">Dashboard</div><h1>Evolução da conformidade</h1>
+      <div class="suave pequeno">Comparação de ${nomeMes(ult.id)}${ant ? ` com ${nomeMes(ant.id)}` : ''}. Meses marcados com * ainda estão abertos (resultado parcial).</div></div></div>
+    <div class="kpis">
+      <div class="kpi"><div class="legenda">Conformidade · ${rot(ult)}</div><div class="v">${pctTxt(ult.geral.conf)}</div>${deltaTxt(delta(ult.geral, ant?.geral))}</div>
+      ${areasVis.map(ar => `<div class="kpi"><div class="legenda">${ar.nome}</div><div class="v">${pctTxt(ult.porArea?.[ar.id]?.conf)}</div>${deltaTxt(delta(ult.porArea?.[ar.id], ant?.porArea?.[ar.id]))}</div>`).join('')}
+    </div>
+    <div class="cartao"><h2>Conformidade geral por mês</h2>${graficoLinha(serie(m => m.geral), 900, 220)}</div>
+    <div class="grade grade-areas">${areasVis.map(ar => `<div class="cartao"><h3>${ar.nome}</h3>${graficoLinha(serie(m => m.porArea?.[ar.id]), 460, 170)}</div>`).join('')}</div>
+    <div class="cartao"><h2 style="margin-bottom:12px">Por processo</h2>
+      <div class="tabela-wrap"><table><thead><tr><th>Área / processo</th>${ultimos.map(m => `<th class="num">${rot(m)}</th>`).join('')}<th class="num">Variação</th><th class="num">NC ${rot(ult)}</th></tr></thead><tbody>
+      ${areasVis.map(ar => `<tr><td colspan="${ultimos.length + 3}"><b style="color:var(--verde)">${ar.nome}</b></td></tr>` +
+        procsUlt.filter(p => p.area === ar.id).map(p => `<tr><td style="padding-left:22px">${esc(p.nome)}</td>
+          ${ultimos.map(m => `<td class="num">${pctTxt(m.porProc?.[p.id]?.conf)}</td>`).join('')}
+          <td class="num">${(() => { const d = delta(ult.porProc?.[p.id], ant?.porProc?.[p.id]); return d == null ? '—' : deltaTxt(d); })()}</td>
+          <td class="num">${ult.porProc?.[p.id]?.NC ?? '—'}</td></tr>`).join('')).join('')}
+      </tbody></table></div>
+      <p class="pequeno suave" style="margin-bottom:0">Conformidade = conformes ÷ (conformes + não conformes). “—” = sem itens avaliados no mês. p.p. = pontos percentuais.</p>
+    </div>`, 'dashboard');
+}
+
+const MES_CURTO = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
+// Gráfico de linha (uma série), escala fixa 0–100%. Ponto vazado = mês aberto (parcial).
+function graficoLinha(pts, W, H) {
+  const pl = 40, pr = 26, pt = 22, pb = 28, n = pts.length;
+  const x = i => n === 1 ? (pl + W - pr) / 2 : pl + i * (W - pl - pr) / (n - 1);
+  const y = v => pt + (1 - v) * (H - pt - pb);
+  const grade = [0, .5, 1].map(v => `<line x1="${pl}" x2="${W - pr}" y1="${y(v)}" y2="${y(v)}" class="g-grade"/><text x="${pl - 6}" y="${y(v) + 4}" text-anchor="end" class="g-eixo">${v * 100}%</text>`).join('');
+  const val = pts.map((p, i) => ({ ...p, i })).filter(p => p.v != null);
+  let path = '';
+  val.forEach((p, k) => { path += `${k ? 'L' : 'M'}${x(p.i).toFixed(1)},${y(p.v).toFixed(1)}`; });
+  const marcas = val.map((p, k) => {
+    const ultimo = k === val.length - 1;
+    return `<g class="g-ponto" tabindex="0"><circle cx="${x(p.i)}" cy="${y(p.v)}" r="14" fill="transparent"/>
+      <circle cx="${x(p.i)}" cy="${y(p.v)}" r="5" class="${p.parcial ? 'g-vazado' : 'g-cheio'}"/>
+      ${ultimo ? `<text x="${x(p.i)}" y="${y(p.v) - 10}" text-anchor="${n > 1 ? 'end' : 'middle'}" class="g-rotulo">${pctTxt(p.v)}</text>` : ''}
+      <title>${p.rot}: ${pctTxt(p.v)} · ${p.resp} itens avaliados · ${p.nc} NC${p.parcial ? ' (parcial)' : ''}</title></g>`;
+  }).join('');
+  const eixoX = pts.map((p, i) => `<text x="${x(i)}" y="${H - 8}" text-anchor="middle" class="g-eixo">${p.rot}</text>`).join('');
+  return `<svg class="graf" viewBox="0 0 ${W} ${H}" role="img" aria-label="Conformidade por mês: ${pts.map(p => `${p.rot} ${pctTxt(p.v)}`).join(', ')}">
+    ${grade}${path ? `<path d="${path}" class="g-linha"/>` : ''}${marcas}${eixoX}
+    ${val.length ? '' : `<text x="${W / 2}" y="${H / 2}" text-anchor="middle" class="g-eixo">Sem itens avaliados</text>`}</svg>`;
+}
+
 // ======================= usuários =======================
 async function telaUsuarios() {
   if (!isAdmin()) { location.hash = '#/painel'; return; }
@@ -732,7 +807,7 @@ async function telaConfig() {
     <div class="cab"><div><div class="legenda">Administração</div><h1>Configurações dos processos</h1>
       <div class="suave pequeno">As mudanças valem para os próximos meses abertos. Meses já abertos guardam a configuração da época.</div></div>
       <div class="acoes"><button class="btn sec" id="padrao">Restaurar padrão</button><button class="btn" id="salvar">Salvar</button></div></div>
-    ${AREAS.map(ar => `<div class="area-tit"><h2>${ar.nome}</h2></div>
+    ${AREAS.map(ar => `<div class="area-tit"><h2>${ar.nome}</h2><button class="btn sec peq" data-novo="${ar.id}" style="margin-left:auto">+ Novo processo</button></div>
       ${catalogo.filter(p => p.area === ar.id).map(p => `<details class="cartao" data-id="${p.id}" style="padding:16px">
         <summary style="cursor:pointer"><b>${esc(p.nome)}</b> <span class="suave pequeno">· ${esc(FONTES[p.fonte].nome)}${p.fonte === 'unico' ? '' : ` · ${p.pct}% (mín. ${p.min})`} · ${p.itens.length} itens</span></summary>
         <div style="margin-top:16px">
@@ -744,13 +819,47 @@ async function telaConfig() {
           </div>
           <div class="campo"><label>Descrição da lista (quando a fonte é lista importada)</label><input type="text" data-f="lista" value="${esc(p.lista || '')}"></div>
           <div class="campo"><label>Itens do checklist (um por linha)</label><textarea data-f="itens" rows="${p.itens.length + 1}">${esc(p.itens.join('\n'))}</textarea></div>
+          <button class="btn perigo peq" data-rem="${p.id}">Remover processo</button>
         </div></details>`).join('')}`).join('')}`, 'config');
-  $('#salvar').onclick = async () => {
-    const nova = catalogo.map(p => {
-      const d = $(`details[data-id="${p.id}"]`), v = f => d.querySelector(`[data-f="${f}"]`).value;
-      return { ...p, nome: v('nome').trim() || p.nome, fonte: v('fonte'), pct: Math.max(0, Math.min(100, +v('pct') || 0)), min: Math.max(0, Math.round(+v('min') || 0)),
-        lista: v('lista').trim(), itens: v('itens').split('\n').map(s => s.trim()).filter(Boolean) };
+  const lerTela = () => catalogo.map(p => {
+    const d = $(`details[data-id="${p.id}"]`), v = f => d.querySelector(`[data-f="${f}"]`).value;
+    return { ...p, nome: v('nome').trim() || p.nome, fonte: v('fonte'), pct: Math.max(0, Math.min(100, +v('pct') || 0)), min: Math.max(0, Math.round(+v('min') || 0)),
+      lista: v('lista').trim(), itens: v('itens').split('\n').map(s => s.trim()).filter(Boolean) };
+  });
+  $$('[data-novo]').forEach(b => b.onclick = async () => {
+    const area = b.dataset.novo;
+    const ok = await modal(`<h2>Novo processo · ${esc(areaNome(area))}</h2>
+      <div class="campo"><label for="n-nome">Nome do processo</label><input id="n-nome" type="text"></div>
+      <div class="campos2">
+        <div class="campo"><label for="n-fonte">Fonte da população</label><select id="n-fonte">${fontesOpts('ativos')}</select></div>
+        <div class="campo"><label for="n-pct">% da população</label><input id="n-pct" type="number" min="0" max="100" step="0.5" value="10"></div>
+        <div class="campo"><label for="n-min">Mínimo de pessoas</label><input id="n-min" type="number" min="0" step="1" value="3"></div>
+      </div>
+      <div class="campo"><label for="n-lista">Descrição da lista (se a fonte for lista importada)</label><input id="n-lista" type="text" placeholder="Ex.: relatório do MIX com a coluna Chapa"></div>
+      <div class="campo"><label for="n-itens">Itens do checklist (um por linha)</label><textarea id="n-itens" rows="6"></textarea></div>
+      <p class="pequeno suave">Para 100% sem sorteio, use 100 no percentual. Listas importadas precisam ter a coluna "Chapa".</p>`, {
+      okTxt: 'Criar processo',
+      onOk: f => {
+        const g = id => f.querySelector(id).value;
+        const nome = g('#n-nome').trim(), itens = g('#n-itens').split('\n').map(x => x.trim()).filter(Boolean);
+        if (!nome) throw new Error('Informe o nome do processo.');
+        if (!itens.length) throw new Error('Inclua pelo menos um item no checklist.');
+        return { id: 'p' + Date.now().toString(36), area, nome, fonte: g('#n-fonte'), pct: Math.max(0, Math.min(100, +g('#n-pct') || 0)),
+          min: Math.max(0, Math.round(+g('#n-min') || 0)), lista: g('#n-lista').trim(), itens };
+      },
     });
+    if (!ok) return;
+    const nova = [...lerTela(), ok];
+    await B.salvarConfig(nova, VERSAO_CATALOGO); catalogo = nova; toast(`Processo “${ok.nome}” criado.`); telaConfig();
+  });
+  $$('[data-rem]').forEach(b => b.onclick = async () => {
+    const p = catalogo.find(x => x.id === b.dataset.rem);
+    if (!await modal(`<h2>Remover “${esc(p.nome)}”?</h2><p>O processo deixa de aparecer nos próximos meses. Meses já abertos não mudam.</p>`, { perigo: true, okTxt: 'Remover' })) return;
+    const nova = lerTela().filter(x => x.id !== p.id);
+    await B.salvarConfig(nova, VERSAO_CATALOGO); catalogo = nova; toast('Processo removido.'); telaConfig();
+  });
+  $('#salvar').onclick = async () => {
+    const nova = lerTela();
     const vazio = nova.find(p => !p.itens.length);
     if (vazio) { toast(`“${vazio.nome}” precisa de pelo menos um item.`, true); return; }
     await B.salvarConfig(nova, VERSAO_CATALOGO); catalogo = nova; toast('Configurações salvas.'); telaConfig();
@@ -770,6 +879,7 @@ async function rotear() {
     if (h[0] === 'mes' && h[1] && h[2] === 'p' && h[3]) return await telaProc(h[1], h[3]);
     if (h[0] === 'mes' && h[1]) return await telaMes(h[1]);
     if (h[0] === 'relatorio' && h[1]) return await telaRelatorio(h[1]);
+    if (h[0] === 'dashboard') return await telaDashboard();
     if (h[0] === 'usuarios') return await telaUsuarios();
     if (h[0] === 'config') return await telaConfig();
     return await telaPainel();
