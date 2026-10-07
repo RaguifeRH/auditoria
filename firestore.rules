@@ -1,0 +1,53 @@
+rules_version = '2';
+// Regras de acesso do sistema de Auditoria Interna Raguife.
+// Publique em: Console do Firebase > Firestore Database > Regras.
+service cloud.firestore {
+  match /databases/{db}/documents {
+
+    function logado() { return request.auth != null; }
+    function perfilDoc() { return get(/databases/$(db)/documents/usuarios/$(request.auth.uid)); }
+    function ativo() {
+      return logado()
+        && exists(/databases/$(db)/documents/usuarios/$(request.auth.uid))
+        && perfilDoc().data.ativo == true;
+    }
+    function admin() { return ativo() && perfilDoc().data.perfil == 'admin'; }
+    function temArea(area) { return ativo() && area in perfilDoc().data.areas; }
+    function auditor() { return ativo() && perfilDoc().data.perfil == 'auditor'; }
+
+    // Cadastro de usuários: só o administrador grava; cada um lê o próprio perfil.
+    match /usuarios/{uid} {
+      allow read: if admin() || (logado() && request.auth.uid == uid);
+      allow write: if admin();
+    }
+
+    // Configuração dos processos
+    match /config/{doc} {
+      allow read: if ativo();
+      allow write: if admin();
+    }
+
+    // Meses de auditoria: todos os usuários ativos leem; só o administrador abre/fecha.
+    match /auditorias/{mes} {
+      allow read: if ativo();
+      allow write: if admin();
+
+      // Base mínima de funcionários do mês (sem CPF/salário): só o administrador.
+      match /base/{doc} {
+        allow read, write: if admin();
+      }
+
+      // Amostras e respostas dos checklists
+      match /amostras/{proc} {
+        allow read: if admin() || temArea(resource.data.area);
+        allow create, delete: if admin();
+        allow update: if admin() || (
+          auditor()
+          && temArea(resource.data.area)
+          && get(/databases/$(db)/documents/auditorias/$(mes)).data.status == 'aberta'
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['respostas'])
+        );
+      }
+    }
+  }
+}

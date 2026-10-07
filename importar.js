@@ -1,0 +1,149 @@
+// Leitura dos relatórios exportados do MIX (xlsx/xls/csv).
+// Nada é enviado a servidor aqui: o arquivo é lido no navegador.
+// Dados sensíveis (CPF, salário, conta bancária) são descartados na leitura.
+
+const norm = s => String(s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
+const CHAPA_RE = /^\d{4,}$/;
+
+export function lerPlanilha(arrayBuffer) {
+  const wb = XLSX.read(arrayBuffer, { type: 'array', cellDates: true });
+  const linhas = [];
+  for (const nome of wb.SheetNames) {
+    const ws = wb.Sheets[nome];
+    linhas.push(...XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: '' }));
+  }
+  return linhas;
+}
+
+export function parseData(v) {
+  if (!v && v !== 0) return null;
+  if (v instanceof Date && !isNaN(v)) return new Date(v.getFullYear(), v.getMonth(), v.getDate());
+  if (typeof v === 'number') { // serial do Excel
+    const d = new Date(Math.round((v - 25569) * 86400000));
+    return new Date(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+  }
+  const m = String(v).trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})/);
+  if (m) {
+    let a = +m[3]; if (a < 100) a += 2000;
+    return new Date(a, +m[2] - 1, +m[1]);
+  }
+  const iso = String(v).trim().match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) return new Date(+iso[1], +iso[2] - 1, +iso[3]);
+  return null;
+}
+
+export const fmtData = d => d ? `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}` : '';
+export const isoData = d => d ? `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` : '';
+
+// Localiza a linha de cabeçalho e devolve { idx: {campo: coluna}, linha }
+function acharCabecalho(linhas, exigidos) {
+  for (let i = 0; i < Math.min(linhas.length, 60); i++) {
+    const cels = linhas[i].map(norm);
+    if (exigidos.every(e => cels.some(c => c === e || c.startsWith(e)))) return { linha: i, cels };
+  }
+  return null;
+}
+const col = (cels, ...nomes) => {
+  for (const n of nomes) { const i = cels.findIndex(c => c === n); if (i >= 0) return i; }
+  for (const n of nomes) { const i = cels.findIndex(c => c.startsWith(n)); if (i >= 0) return i; }
+  return -1;
+};
+const chapaDe = v => String(v ?? '').trim().replace(/\.0$/, '');
+// A Chapa se repete entre filiais/pessoas diferentes, então a chave é Chapa + nome.
+export const chave = (chapa, nome) => `${chapa}|${norm(nome)}`;
+
+// Identifica o tipo de relatório pelo cabeçalho
+export function identificar(linhas) {
+  if (acharCabecalho(linhas, ['chapa', 'nome', 'dt. admissao'])) return 'funcionarios';
+  if (acharCabecalho(linhas, ['chapa', 'cpf'])) return 'complementar';
+  if (acharCabecalho(linhas, ['chapa'])) return 'lista';
+  return null;
+}
+
+// Relatório 1: Chapa, Nome, Cargo, Faixa, Salário, Depto, Admissão, Demissão, Status
+export function lerFuncionarios(linhas) {
+  const h = acharCabecalho(linhas, ['chapa', 'nome', 'dt. admissao']);
+  if (!h) throw new Error('Cabeçalho do relatório de funcionários não encontrado (Chapa, Nome, Dt. Admissão).');
+  const c = {
+    chapa: col(h.cels, 'chapa'), nome: col(h.cels, 'nome'), cargo: col(h.cels, 'cargo'),
+    faixa: col(h.cels, 'faixa sal.', 'faixa'), depto: col(h.cels, 'depto', 'departamento', 'secao'),
+    adm: col(h.cels, 'dt. admissao', 'admissao'), dem: col(h.cels, 'dt. demissao', 'demissao'),
+    status: col(h.cels, 'status func.', 'status', 'situacao'),
+  };
+  const out = new Map();
+  for (const r of linhas.slice(h.linha + 1)) {
+    const chapa = chapaDe(r[c.chapa]);
+    if (!CHAPA_RE.test(chapa)) continue;
+    const adm = parseData(r[c.adm]);
+    if (!adm) continue;
+    const nome = String(r[c.nome] || '').trim();
+    const id = chave(chapa, nome);
+    const ant = out.get(id);
+    const dem = c.dem >= 0 ? parseData(r[c.dem]) : null;
+    // readmissão/duplicidade: fica o vínculo mais recente (sem demissão vence)
+    if (ant && (ant.adm > adm || (+ant.adm === +adm && (!ant.dem || (dem && ant.dem > dem))))) continue;
+    out.set(id, {
+      id, chapa, nome, cargo: String(r[c.cargo] || '').trim(),
+      faixa: c.faixa >= 0 ? String(r[c.faixa] || '').trim() : '',
+      depto: c.depto >= 0 ? String(r[c.depto] || '').trim() : '',
+      adm, dem,
+      status: c.status >= 0 ? String(r[c.status] || '').trim() : '',
+    });
+  }
+  return out;
+}
+
+// Relatório 2: Chapa, Nome, CPF, Escala, CBO, Nascimento. CPF é lido só para descartar.
+export function lerComplementar(linhas) {
+  const h = acharCabecalho(linhas, ['chapa', 'cpf']);
+  if (!h) throw new Error('Cabeçalho do relatório complementar não encontrado (Chapa, CPF).');
+  const c = {
+    chapa: col(h.cels, 'chapa'), nome: col(h.cels, 'nome'), escala: col(h.cels, 'escala horario de trab.', 'escala', 'horario', 'jornada'),
+    cbo: col(h.cels, 'cbo'), nasc: col(h.cels, 'dt. nascimento', 'nascimento', 'data de nascimento'),
+  };
+  const out = new Map();
+  for (const r of linhas.slice(h.linha + 1)) {
+    const chapa = chapaDe(r[c.chapa]);
+    if (!CHAPA_RE.test(chapa)) continue;
+    out.set(chave(chapa, r[c.nome]), {
+      escala: c.escala >= 0 ? String(r[c.escala] || '').trim() : '',
+      cbo: c.cbo >= 0 ? String(r[c.cbo] || '').trim() : '',
+      nasc: c.nasc >= 0 ? parseData(r[c.nasc]) : null,
+    });
+  }
+  return out;
+}
+
+// Junta os dois relatórios pela Chapa e devolve avisos de Chapas sem par
+export function juntarBase(func, comp) {
+  const avisos = [];
+  const base = [];
+  for (const [id, f] of func) {
+    const x = comp ? comp.get(id) : null;
+    if (comp && !x) avisos.push(`Chapa ${f.chapa} (${f.nome}) está no relatório de funcionários, mas não no complementar.`);
+    base.push({ ...f, escala: x?.escala || '', cbo: x?.cbo || '', nasc: x?.nasc || null });
+  }
+  if (comp) for (const id of comp.keys()) if (!func.has(id)) avisos.push(`Chapa ${id.split('|')[0]} está no relatório complementar, mas não no de funcionários.`);
+  return { base, avisos };
+}
+
+// Lista genérica: qualquer relatório com coluna "Chapa" (ex.: Relação de Líquidos de Férias).
+// Ignora cabeçalhos repetidos, linhas de filial/totais e colunas bancárias.
+export function lerLista(linhas) {
+  const out = new Map();
+  let c = null;
+  for (const r of linhas) {
+    const cels = r.map(norm);
+    const iChapa = cels.findIndex(x => x === 'chapa');
+    if (iChapa >= 0) { c = { chapa: iChapa, nome: col(cels, 'nome'), cargo: col(cels, 'cargo', 'funcao') }; continue; }
+    if (!c) continue;
+    const chapa = chapaDe(r[c.chapa]);
+    if (!CHAPA_RE.test(chapa)) continue;
+    const nome = c.nome >= 0 ? String(r[c.nome] || '').trim() : '';
+    const id = chave(chapa, nome);
+    if (out.has(id)) continue;
+    out.set(id, { id, chapa, nome, cargo: c.cargo >= 0 ? String(r[c.cargo] || '').trim() : '' });
+  }
+  if (!c) throw new Error('Nenhuma coluna "Chapa" encontrada no arquivo.');
+  return [...out.values()];
+}
