@@ -354,19 +354,19 @@ async function telaMes(mes) {
 }
 
 // Importação de lista: o arquivo é lido assim que escolhido, e o sorteio só acontece na confirmação.
-let listaLida = null;
+let listaLida = null, procImport = null;
 document.addEventListener('change', async ev => {
   if (ev.target.id !== 'larq') return;
   const f = ev.target.files[0]; if (!f) return;
   const res = $('#lres');
   try {
-    listaLida = { lista: lerLista(lerPlanilha(await f.arrayBuffer())), nome: f.name };
+    listaLida = { lista: lerLista(lerPlanilha(await f.arrayBuffer()), procImport), nome: f.name };
     res.innerHTML = `<b>${esc(f.name)}</b>: ${listaLida.lista.length} pessoa(s) encontrada(s).`;
   } catch (e) { listaLida = null; res.innerHTML = `<span class="erro">${esc(e.message)}</span>`; }
 });
 
 async function importarLista(a, p) {
-  listaLida = null;
+  listaLida = null; procImport = p.id;
   const ok = await modal(`<h2>${esc(p.nome)}</h2>
     <p class="pequeno suave">Fonte esperada: ${esc(p.lista || 'relatório com coluna Chapa')}. Competência ${nomeMes(a.competencia)}.</p>
     <label class="drop"><input type="file" id="larq" accept=".xlsx,.xls,.csv">Clique para escolher o arquivo</label>

@@ -145,11 +145,41 @@ function lerConsignado(linhas, h) {
   return [...out.values()].map(({ _n, _v, _b, ...x }) => ({ ...x, info: `${_n} contrato(s) · parcelas ${brl(_v)} · ${[..._b].join(', ')}` }));
 }
 
+// Fatura do plano de saúde (operadora): uma linha por beneficiário e evento.
+// "CPP" = mensalidade; "COPARTICIPACAO" = uso do plano. Agrupa pelo titular (respfamilia).
+// - processo "planos": titulares com dependentes (mensalidade dos dependentes é descontada do titular)
+// - demais (coparticipação): titulares com coparticipação própria ou dos dependentes
+function lerPlanoSaude(linhas, h, procId) {
+  const c = { resp: col(h.cels, 'respfamilia'), benef: col(h.cels, 'beneficiario'), rel: col(h.cels, 'relacionamento'),
+    ev: col(h.cels, 'dsevento'), st: col(h.cels, 'statusbenef'), valor: col(h.cels, 'valor') };
+  const brl = v => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+  const fam = new Map();
+  for (const r of linhas.slice(h.linha + 1)) {
+    const resp = String(r[c.resp] || '').trim(); if (!resp) continue;
+    const f = fam.get(resp) || { deps: new Set(), cppDep: 0, cop: 0, nCop: 0, cancel: false };
+    const titular = norm(r[c.rel]) === 'titular', ev = norm(r[c.ev]), v = Number(r[c.valor]) || 0;
+    if (norm(r[c.st]) === 'cancelado') f.cancel = true;
+    if (ev.startsWith('cpp') && !titular) { f.deps.add(String(r[c.benef]).trim()); f.cppDep += v; }
+    if (ev.startsWith('copart')) { f.cop += v; f.nCop++; }
+    fam.set(resp, f);
+  }
+  const out = [];
+  for (const [nome, f] of fam) {
+    const canc = f.cancel ? ' · beneficiário cancelado na fatura' : '';
+    if (procId === 'planos') { if (f.deps.size) out.push({ id: `|${norm(nome)}|`, chapa: '', nome, info: `${f.deps.size} dependente(s) · mensalidade dos dependentes ${brl(f.cppDep)}${canc}` }); }
+    else if (f.nCop) out.push({ id: `|${norm(nome)}|`, chapa: '', nome, info: `coparticipação ${brl(f.cop)} (${f.nCop} lançamento(s) da família)${canc}` });
+  }
+  return out;
+}
+
 // Lista genérica: qualquer relatório com coluna "Chapa" (ex.: Relação de Líquidos de Férias).
 // Ignora cabeçalhos repetidos, linhas de filial/totais e colunas bancárias.
-export function lerLista(linhas) {
+// Também reconhece o arquivo do consignado e a fatura do plano de saúde.
+export function lerLista(linhas, procId) {
   const hc = acharCabecalho(linhas, ['nometrabalhador', 'dataadmissao']);
   if (hc) return lerConsignado(linhas, hc);
+  const hs = acharCabecalho(linhas, ['respfamilia', 'dsevento']);
+  if (hs) return lerPlanoSaude(linhas, hs, procId);
   const out = new Map();
   let c = null;
   for (const r of linhas) {
