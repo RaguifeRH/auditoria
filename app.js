@@ -1,8 +1,8 @@
-import { firebaseConfig } from './config.js?v=5';
-import { criarBackend } from './data.js?v=5';
-import { AREAS, FONTES, PROCESSOS_PADRAO, VERSAO_CATALOGO, areaNome } from './processos.js?v=5';
-import { lerPlanilha, identificar, lerFuncionarios, lerComplementar, juntarBase, lerLista, mesclar, fmtData } from './importar.js?v=5';
-import { nomeMes, competenciaDe, gerarCodigo, impressao, tamanhoAmostra, sortear, populacao } from './sorteio.js?v=5';
+import { firebaseConfig } from './config.js?v=6';
+import { criarBackend } from './data.js?v=6';
+import { AREAS, FONTES, PROCESSOS_PADRAO, VERSAO_CATALOGO, areaNome } from './processos.js?v=6';
+import { lerPlanilha, identificar, lerFuncionarios, lerComplementar, juntarBase, lerLista, mesclar, fmtData } from './importar.js?v=6';
+import { nomeMes, competenciaDe, gerarCodigo, impressao, tamanhoAmostra, sortear, populacao } from './sorteio.js?v=6';
 
 // ======================= utilidades =======================
 const $ = (s, el = document) => el.querySelector(s);
@@ -73,20 +73,35 @@ function somar(lista) {
 }
 
 // ======================= casca =======================
+// Símbolo Raguife (mesmo desenho usado nos demais sistemas internos)
+const logoSVG = size => `<svg width="${size}" height="${Math.round(size * 0.78)}" viewBox="0 0 100 78" aria-hidden="true">
+  <rect x="4" y="4" width="92" height="70" rx="12" fill="none" stroke="#9DCD46" stroke-width="7"/>
+  <circle cx="30" cy="27" r="6.5" fill="#9DCD46"/><circle cx="50" cy="23" r="6.5" fill="#9DCD46"/><circle cx="70" cy="27" r="6.5" fill="#9DCD46"/>
+  <path d="M27 40 v9 a11.5 11.5 0 0 0 23 0 v-9" fill="none" stroke="#9DCD46" stroke-width="9" stroke-linecap="round"/>
+  <path d="M50 40 v9 a11.5 11.5 0 0 0 23 0 v-9" fill="none" stroke="#9DCD46" stroke-width="9" stroke-linecap="round"/></svg>`;
+const ICONES = {
+  painel: '<path d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z"/>',
+  dashboard: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
+  usuarios: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.6-3.6 3.3-6 6.5-6s5.9 2.4 6.5 6M16 4.5a3.5 3.5 0 0 1 0 7M18 14c2 .7 3.3 2.9 3.6 6"/>',
+  config: '<path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/>',
+};
+const icone = k => `<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONES[k]}</svg>`;
+
 function casca(conteudo, ativo) {
-  const links = [['#/painel', 'Painel', 'painel'], ['#/dashboard', 'Dashboard', 'dashboard']];
-  if (isAdmin()) links.push(['#/usuarios', 'Usuários', 'usuarios'], ['#/config', 'Configurações', 'config']);
+  const nav = [['painel', '#/painel', 'Painel'], ['dashboard', '#/dashboard', 'Dashboard']];
+  const adm = isAdmin() ? [['usuarios', '#/usuarios', 'Usuários'], ['config', '#/config', 'Configurações']] : [];
+  const btn = ([k, h, t]) => `<a class="navbtn ${k === ativo ? 'active' : ''}" href="${h}">${icone(k)}<span>${t}</span></a>`;
   app.innerHTML = `
-    ${B.modo === 'demo' ? '<div class="faixa-demo">Modo demonstração: os dados ficam só neste navegador. Configure o Firebase para uso real.</div>' : ''}
-    <header class="topo"><div class="topo-in">
-      <a href="#/painel"><img src="raguife-logo.png" alt="Raguife"></a>
-      <span class="titulo-sis">Auditoria Interna</span>
-      <nav class="menu">${links.map(([h, t, k]) => `<a href="${h}" class="${k === ativo ? 'ativo' : ''}">${t}</a>`).join('')}
-        <span class="usuario">${esc(eu.nome)} · ${PERFIS[eu.perfil]}</span>
-        <button class="btn sec peq" id="minhaSenha">Minha senha</button>
-        <button class="btn sec peq" id="sair">Sair</button></nav>
-    </div></header>
-    <main>${conteudo}</main>`;
+    <header class="topbar">
+      <a class="brandline" href="#/painel">${logoSVG(34)}<div><span class="wordmark">raguife</span><span class="app-sub">Auditoria interna</span></div></a>
+      <div class="userchip"><div><span class="uname">${esc(eu.nome)}</span><span class="urole">${PERFIS[eu.perfil]}</span></div>
+        <button class="btn-top" id="minhaSenha">Alterar senha</button><button class="btn-top" id="sair">Sair</button></div>
+    </header>
+    <div class="layout">
+      <nav class="side" aria-label="Menu"><div class="navlbl">Auditoria</div>${nav.map(btn).join('')}
+        ${adm.length ? `<div class="navlbl">Administração</div>${adm.map(btn).join('')}` : ''}</nav>
+      <main>${B.modo === 'demo' ? '<div class="faixa-demo">Modo demonstração: os dados ficam só neste navegador.</div>' : ''}<div class="page">${conteudo}</div></main>
+    </div>`;
   $('#sair').onclick = () => B.logout();
   $('#minhaSenha').onclick = trocarMinhaSenha;
 }
@@ -109,17 +124,20 @@ async function trocarMinhaSenha() {
 }
 
 // ======================= login =======================
+const marcaLogin = `<div class="login-brand">${logoSVG(96)}<div class="wordmark">raguife</div><div class="tagline">confiança que inspira</div>
+  <div class="lb-title">Auditoria<br><em>interna</em></div><div class="lb-sub">DP · Segurança do Trabalho · Ambulatório · RH</div></div>`;
 function telaLogin() {
-  app.innerHTML = `<div class="login"><form class="caixa" id="f">
-    <img src="raguife-logo.png" alt="Raguife">
-    <h1>Auditoria Interna de Processos</h1>
-    ${B.modo === 'demo' ? '<p class="avisos" style="margin-bottom:16px">Modo demonstração. Acesse com <b>admin@demo</b> / <b>demo123</b>.</p>' : ''}
+  app.innerHTML = `<div class="login">${marcaLogin}<div class="login-form-wrap"><form class="login-card" id="f">
+    <div class="eyebrow-mod">Acesso restrito</div>
+    <h2>Entrar</h2>
+    <div class="sub">Use o e-mail e a senha cadastrados pelo administrador.</div>
+    ${B.modo === 'demo' ? '<p class="note">Modo demonstração: <b>admin@demo</b> / <b>demo123</b></p>' : ''}
     <div class="campo"><label for="em">E-mail</label><input id="em" type="email" autocomplete="username" required></div>
     <div class="campo"><label for="se">Senha</label><input id="se" type="password" autocomplete="current-password" required></div>
     <button class="btn" style="width:100%;justify-content:center">Entrar</button>
     <div class="erro oculto" id="er"></div>
-    <p style="text-align:center;margin:16px 0 0"><a href="#" id="esq" class="pequeno">Esqueci minha senha</a></p>
-  </form></div>`;
+    <button type="button" class="forgot" id="esq">Esqueci minha senha</button>
+  </form></div></div>`;
   $('#f').onsubmit = async ev => {
     ev.preventDefault(); const er = $('#er'); er.classList.add('oculto');
     try { await B.login($('#em').value, $('#se').value); }
@@ -134,12 +152,12 @@ function telaLogin() {
   };
 }
 function telaSemPerfil(u, inativo) {
-  app.innerHTML = `<div class="login"><div class="caixa">
-    <img src="raguife-logo.png" alt="Raguife">
-    <h1>${inativo ? 'Acesso desativado' : 'Usuário sem perfil'}</h1>
-    <p>${inativo ? 'Seu acesso foi desativado pelo administrador.' : 'Seu login existe, mas ainda não tem perfil de acesso. Peça ao administrador do sistema.'}</p>
-    ${inativo ? '' : `<p class="pequeno suave">Primeiro acesso do sistema? Siga o passo “Criar o primeiro administrador” do guia de implantação usando este identificador:<br><span class="codigo" style="font-size:13px;word-break:break-all">${esc(u.uid)}</span></p>`}
-    <button class="btn sec" id="sair">Sair</button></div></div>`;
+  app.innerHTML = `<div class="login">${marcaLogin}<div class="login-form-wrap"><div class="login-card">
+    <div class="eyebrow-mod">Acesso</div>
+    <h2>${inativo ? 'Desativado' : 'Sem perfil'}</h2>
+    <p class="sub">${inativo ? 'Seu acesso foi desativado pelo administrador.' : 'Seu login existe, mas ainda não tem perfil de acesso. Peça ao administrador do sistema.'}</p>
+    ${inativo ? '' : `<p class="note">Primeiro acesso do sistema? Siga o passo “Criar o primeiro administrador” do guia de implantação usando este identificador:<br><span class="codigo" style="font-size:13px;word-break:break-all">${esc(u.uid)}</span></p>`}
+    <button class="btn sec" id="sair" style="margin-top:16px">Sair</button></div></div></div>`;
   $('#sair').onclick = () => B.logout();
 }
 
@@ -355,8 +373,8 @@ async function telaMes(mes) {
     ${areasVis.map(ar => {
       const ps = a.processos.filter(p => p.area === ar.id);
       const e = somar(ps.map(p => porId[p.id]).filter(Boolean).map(estat));
-      return `<div class="area-tit"><h2>${ar.nome}</h2><span class="suave pequeno">· conformidade ${pctTxt(e.conf)}</span></div>
-        <div class="grade">${ps.map(cardProc).join('')}</div>`;
+      return `<div class="area-tit" data-area="${ar.id}"><h2>${ar.nome}</h2><span class="suave pequeno">conformidade ${pctTxt(e.conf)}</span></div>
+        <div class="grade" data-area="${ar.id}">${ps.map(cardProc).join('')}</div>`;
     }).join('')}
   `, 'painel');
 
@@ -700,7 +718,7 @@ async function telaDashboard() {
       ${areasVis.map(ar => `<div class="kpi"><div class="legenda">${ar.nome}</div><div class="v">${pctTxt(ult.porArea?.[ar.id]?.conf)}</div>${deltaTxt(delta(ult.porArea?.[ar.id], ant?.porArea?.[ar.id]))}</div>`).join('')}
     </div>
     <div class="cartao"><h2>Conformidade geral por mês</h2>${graficoLinha(serie(m => m.geral), 900, 220)}</div>
-    <div class="grade grade-areas">${areasVis.map(ar => `<div class="cartao"><h3>${ar.nome}</h3>${graficoLinha(serie(m => m.porArea?.[ar.id]), 460, 170)}</div>`).join('')}</div>
+    <div class="grade grade-areas">${areasVis.map(ar => `<div class="cartao" data-area="${ar.id}"><h3>${ar.nome}</h3>${graficoLinha(serie(m => m.porArea?.[ar.id]), 460, 170)}</div>`).join('')}</div>
     <div class="cartao"><h2 style="margin-bottom:12px">Por processo</h2>
       <div class="tabela-wrap"><table><thead><tr><th>Área / processo</th>${ultimos.map(m => `<th class="num">${rot(m)}</th>`).join('')}<th class="num">Variação</th><th class="num">NC ${rot(ult)}</th></tr></thead><tbody>
       ${areasVis.map(ar => `<tr><td colspan="${ultimos.length + 3}"><b style="color:var(--verde)">${ar.nome}</b></td></tr>` +
@@ -807,7 +825,7 @@ async function telaConfig() {
     <div class="cab"><div><div class="legenda">Administração</div><h1>Configurações dos processos</h1>
       <div class="suave pequeno">As mudanças valem para os próximos meses abertos. Meses já abertos guardam a configuração da época.</div></div>
       <div class="acoes"><button class="btn sec" id="padrao">Restaurar padrão</button><button class="btn" id="salvar">Salvar</button></div></div>
-    ${AREAS.map(ar => `<div class="area-tit"><h2>${ar.nome}</h2><button class="btn sec peq" data-novo="${ar.id}" style="margin-left:auto">+ Novo processo</button></div>
+    ${AREAS.map(ar => `<div class="area-tit" data-area="${ar.id}"><h2>${ar.nome}</h2><button class="btn sec peq" data-novo="${ar.id}" style="margin-left:auto">+ Novo processo</button></div>
       ${catalogo.filter(p => p.area === ar.id).map(p => `<details class="cartao" data-id="${p.id}" style="padding:16px">
         <summary style="cursor:pointer"><b>${esc(p.nome)}</b> <span class="suave pequeno">· ${esc(FONTES[p.fonte].nome)}${p.fonte === 'unico' ? '' : ` · ${p.pct}% (mín. ${p.min})`} · ${p.itens.length} itens</span></summary>
         <div style="margin-top:16px">
