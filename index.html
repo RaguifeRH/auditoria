@@ -2,30 +2,18 @@
 <html lang="pt-BR">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="color-scheme" content="light">
-<title>Avaliação de Desempenho Raguife</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Auditoria Interna Raguife</title>
+<link rel="icon" href="raguife-simbolo.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,700..900&family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="app.css">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="app.css?v=5">
+<script src="xlsx.full.min.js"></script>
 </head>
 <body>
-<div id="demo-bar" class="demo-bar hidden"></div>
-<div id="root"><div class="loading"><span class="spin"></span> Carregando…</div></div>
-<div id="modal-bg"><div class="modal" id="modal"></div></div>
-<div id="toast"></div>
-<div id="print-area"></div>
-
-<script src="config.js"></script>
-<script src="matriz.js"></script>
-<script src="cartas.js"></script>
-<script src="pdi.js"></script>
-<script src="store.js"></script>
-<script src="app.js"></script>
-<script src="rh.js"></script>
-<script src="salarial.js"></script>
-<script src="melhorias.js"></script>
-<script src="aval.js"></script>
+<div id="app"><div class="carregando">Carregando…</div></div>
+<div id="toast" role="status" aria-live="polite"></div>
+<script type="module" src="app.js?v=5"></script>
 </body>
 </html>
