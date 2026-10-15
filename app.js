@@ -623,6 +623,14 @@ async function telaRelatorio(mes) {
   const est = procs.map(p => ({ p, am: porId[p.id], e: porId[p.id] ? estat(porId[p.id]) : null }));
   const geral = somar(est.filter(o => o.e).map(o => o.e));
   const auditores = [...new Set(ams.flatMap(x => Object.values(x.respostas || {}).flatMap(r => Object.values(r).map(v => v.nome))))];
+  // Lista de assinatura: todos os auditores ativos cadastrados com área no escopo do relatório,
+  // mais quem respondeu itens (ex.: administrador). Se o perfil não puder listar usuários, usa só quem respondeu.
+  const areasRel = new Set(procs.map(p => p.area));
+  const cadastrados = await B.listarUsuarios().catch(() => []);
+  const assinantes = [...new Set([
+    ...cadastrados.filter(u => u.ativo && u.perfil === 'auditor' && (u.areas || []).some(ar => areasRel.has(ar))).map(u => u.nome),
+    ...auditores,
+  ].filter(Boolean))].sort((x, y) => x.localeCompare(y, 'pt-BR'));
   const ncs = [];
   for (const o of est) if (o.am) for (const pe of o.am.pessoas) for (const [i, r] of Object.entries(o.am.respostas?.[pe.k] || {}))
     if (r.s === 'NC') ncs.push({ proc: o.p, area: o.p.area, pe, item: o.am.itens[i], r });
@@ -674,7 +682,11 @@ async function telaRelatorio(mes) {
       <h2>Metodologia</h2>
       <p class="pequeno">A auditoria do mês ${nomeMes(mes)} avalia a competência ${nomeMes(a.competencia)}, já fechada. Para cada processo, a população foi formada a partir da base de funcionários exportada do MIX (ativos, admitidos, desligados, vencimentos de experiência ou menores na competência) ou de lista específica importada. A amostra corresponde ao percentual configurado da população, respeitado o mínimo, e foi sorteada de forma aleatória e reprodutível a partir do código de sorteio <b>${esc(a.codigo)}</b>. A “impressão” de cada população (SHA-256 das Chapas) permite comprovar que a base usada não foi alterada. Processos configurados com 100% verificam toda a população, sem sorteio. A conformidade é calculada como itens conformes ÷ (conformes + não conformes); itens “não se aplica” não entram no cálculo.</p>
 
-      <div class="assin"><div>Gerente de Recursos Humanos</div><div>Auditor(es)</div></div>
+      <h2>Assinaturas</h2>
+      <div class="assin" style="row-gap:48px">
+        <div>Gerente de Recursos Humanos</div>
+        ${assinantes.length ? assinantes.map(n => `<div>${esc(n)}<br><span class="pequeno suave">Auditor</span></div>`).join('') : '<div>Auditor(es)</div>'}
+      </div>
     </article>`, 'painel');
   $('#imprimir')?.addEventListener('click', () => window.print());
 }
